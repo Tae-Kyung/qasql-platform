@@ -4,7 +4,7 @@
     "app/api/projects/*/setup": { "maxDuration": 120 },
     "app/api/projects/*/playground": { "maxDuration": 60 },
     "engine/handlers/**": {
-      "runtime": "python3.12",
+      "runtime": "@vercel/python@6.33.0",
       "maxDuration": 120
     }
   },

@@ -1,4 +1,4 @@
-qasql @ file:../../
+qasql @ git+https://github.com/Tae-Kyung/qasql-platform.git#subdirectory=qasql
 psycopg2-binary>=2.9.0
 mysql-connector-python>=8.0.0
 supabase>=2.0.0
