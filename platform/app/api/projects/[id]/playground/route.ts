@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+
+export const maxDuration = 60;
 import { withAuth } from "@/lib/api/auth-guard";
 import { createServiceClient } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/crypto/encrypt";

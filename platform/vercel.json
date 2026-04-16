@@ -1,8 +1,5 @@
 {
   "functions": {
-    "app/api/v1/**": { "maxDuration": 60 },
-    "app/api/projects/*/setup": { "maxDuration": 120 },
-    "app/api/projects/*/playground": { "maxDuration": 60 },
     "engine/handlers/**": {
       "runtime": "@vercel/python@6.33.0",
       "maxDuration": 120

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+
+export const maxDuration = 60;
 import { verifyApiKeyFromRequest } from "@/lib/api/verify-api-key";
 import { createServiceClient } from "@/lib/supabase/server";
 import { z } from "zod";

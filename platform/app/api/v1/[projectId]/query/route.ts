@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+
+export const maxDuration = 60;
 import { verifyApiKeyFromRequest } from "@/lib/api/verify-api-key";
 import { validateBody } from "@/lib/api/validate";
 import { queryRequestSchema } from "@/lib/validations/query";
