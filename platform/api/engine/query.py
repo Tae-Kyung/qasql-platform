@@ -1,6 +1,6 @@
 """
 Vercel Python Serverless Function — POST /internal/engine/query
-Rewrites to: engine/handlers/query.py
+Rewrites to: api/engine/query.py
 
 Receives: {
   project_id: string,
@@ -25,7 +25,7 @@ import tempfile
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler
 
-_ENGINE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ENGINE_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ENGINE_ROOT not in sys.path:
     sys.path.insert(0, _ENGINE_ROOT)
 

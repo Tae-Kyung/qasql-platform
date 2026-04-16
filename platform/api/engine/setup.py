@@ -1,6 +1,6 @@
 """
 Vercel Python Serverless Function — POST /internal/engine/setup
-Rewrites to: engine/handlers/setup.py
+Rewrites to: api/engine/setup.py
 
 Receives: { project_id: string }
 Header:   x-internal-secret: <INTERNAL_API_SECRET>
@@ -21,7 +21,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler
 
 # Resolve engine/ root so _utils can be imported
-_ENGINE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ENGINE_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ENGINE_ROOT not in sys.path:
     sys.path.insert(0, _ENGINE_ROOT)
 
