@@ -108,6 +108,10 @@ class SQLJudge:
         # Multiple successful - use LLM judge
         return self._llm_judge(successful, nl_query, hint, total_candidates)
 
+    # T-104: Max sample rows/length for judge prompt
+    MAX_SAMPLE_ROWS_FOR_JUDGE = 5
+    MAX_ROW_STR_LENGTH = 200
+
     def _llm_judge(
         self,
         successful: list[tuple[SQLCandidate, ExecutionResult]],
@@ -115,14 +119,28 @@ class SQLJudge:
         hint: str,
         total_candidates: int
     ) -> JudgmentResult:
-        """Use LLM to judge between multiple successful candidates."""
-        # Build candidates section
+        """Use LLM to judge between multiple successful candidates (T-104: includes execution results)."""
+        # Build candidates section with execution result summaries
         candidates_text = []
         for candidate, exec_result in successful:
-            candidates_text.append(
-                f"Option {candidate.candidate_id} ({candidate.strategy_name}):\n"
-                f"{exec_result.sql}"
-            )
+            text = f"Option {candidate.candidate_id} ({candidate.strategy_name}):\n"
+            text += f"SQL: {exec_result.sql}\n"
+
+            # T-104: Include execution result summary
+            row_count = len(exec_result.rows) if exec_result.rows else 0
+            col_names = exec_result.columns if exec_result.columns else []
+            text += f"Result: {row_count} rows, columns: {col_names}\n"
+
+            if exec_result.rows and row_count > 0:
+                sample_rows = exec_result.rows[:self.MAX_SAMPLE_ROWS_FOR_JUDGE]
+                text += "Sample output:\n"
+                for row in sample_rows:
+                    row_str = str(row)
+                    if len(row_str) > self.MAX_ROW_STR_LENGTH:
+                        row_str = row_str[:self.MAX_ROW_STR_LENGTH] + "..."
+                    text += f"  {row_str}\n"
+
+            candidates_text.append(text)
 
         hint_section = f"Hint: {hint}" if hint else ""
 

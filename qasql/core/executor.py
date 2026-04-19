@@ -5,10 +5,11 @@ Executes SQL candidates with retry and refinement logic.
 """
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-from qasql.core.prompts import REFINEMENT_PROMPT, LAST_RESORT_PROMPT
+from qasql.core.prompts import REFINEMENT_PROMPT, LAST_RESORT_PROMPT, _build_system_prompt
 from qasql.core.generator import SQLCandidate
 
 
@@ -30,7 +31,7 @@ class SQLExecutor:
 
     Features:
     - Retry up to max_iterations on failure
-    - LLM-based SQL refinement on errors
+    - LLM-based SQL refinement on errors with cumulative error history (T-103)
     - Last resort generation if all candidates fail
     """
 
@@ -39,12 +40,16 @@ class SQLExecutor:
         db_connector: Any,
         llm_client: Any,
         max_iterations: int = 3,
-        query_timeout: float = 30.0
+        query_timeout: float = 30.0,
+        db_type: str = "sqlite",
+        connector_factory: Callable = None,
     ):
         self.db_connector = db_connector
         self.llm_client = llm_client
         self.max_iterations = max_iterations
         self.query_timeout = query_timeout
+        self.db_type = db_type
+        self._connector_factory = connector_factory  # T-113: for parallel execution
 
     def execute_all_candidates(
         self,
@@ -53,7 +58,7 @@ class SQLExecutor:
         schema_str: str
     ) -> list[ExecutionResult]:
         """
-        Execute all candidates with retry loops.
+        Execute all candidates sequentially with retry loops.
 
         Args:
             candidates: SQL candidates to execute
@@ -73,15 +78,83 @@ class SQLExecutor:
 
         return results
 
+    def execute_all_candidates_parallel(
+        self,
+        candidates: list[SQLCandidate],
+        nl_query: str,
+        schema_str: str,
+        max_workers: int = None,
+    ) -> list[ExecutionResult]:
+        """
+        Execute all candidates in parallel using thread pool (T-113).
+
+        Each thread gets its own DB connector via connector_factory.
+        Requires connector_factory to be set for thread safety.
+
+        Args:
+            candidates: SQL candidates to execute
+            nl_query: Original natural language query
+            schema_str: Schema string for refinement
+            max_workers: Max concurrent threads (default: min(len(candidates), 4))
+
+        Returns:
+            List of execution results in original candidate order
+        """
+        if not self._connector_factory:
+            # Fall back to sequential if no factory
+            return self.execute_all_candidates(candidates, nl_query, schema_str)
+
+        max_workers = max_workers or min(len(candidates), 4)
+        results = [None] * len(candidates)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {}
+            for i, candidate in enumerate(candidates):
+                future = executor.submit(
+                    self._execute_with_retry_isolated,
+                    candidate, nl_query, schema_str
+                )
+                future_to_idx[future] = i
+
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    results[idx] = ExecutionResult(
+                        candidate_id=candidates[idx].candidate_id,
+                        sql=candidates[idx].sql,
+                        success=False,
+                        error=str(e),
+                    )
+
+        return results
+
+    def _execute_with_retry_isolated(
+        self,
+        candidate: SQLCandidate,
+        nl_query: str,
+        schema_str: str,
+    ) -> ExecutionResult:
+        """Thread-safe variant: creates its own DB connector per invocation."""
+        original_connector = self.db_connector
+        try:
+            # Use a fresh connector for this thread
+            self.db_connector = self._connector_factory()
+            return self._execute_with_retry(candidate, nl_query, schema_str)
+        finally:
+            self.db_connector = original_connector
+
     def _execute_with_retry(
         self,
         candidate: SQLCandidate,
         nl_query: str,
         schema_str: str
     ) -> ExecutionResult:
-        """Execute a single candidate with retry loop."""
+        """Execute a single candidate with retry loop and cumulative error history (T-103)."""
         sql = candidate.sql
         last_error = None
+        error_history = []
 
         for iteration in range(1, self.max_iterations + 1):
             if not sql:
@@ -108,10 +181,17 @@ class SQLExecutor:
 
             except Exception as e:
                 last_error = str(e)
+                error_history.append({
+                    "iteration": iteration,
+                    "sql": sql[:200],
+                    "error": last_error[:200]
+                })
 
                 # Try refinement if not last iteration
                 if iteration < self.max_iterations:
-                    refined_sql = self._refine_sql(sql, last_error, schema_str, nl_query)
+                    refined_sql = self._refine_sql(
+                        sql, last_error, schema_str, nl_query, error_history
+                    )
                     if refined_sql and refined_sql != sql:
                         sql = refined_sql
                     else:
@@ -133,20 +213,38 @@ class SQLExecutor:
         sql: str,
         error: str,
         schema_str: str,
-        nl_query: str
+        nl_query: str,
+        error_history: list = None
     ) -> str:
-        """Use LLM to refine SQL based on error."""
+        """Use LLM to refine SQL based on error with cumulative history (T-103)."""
+        # Build error history section
+        history_str = ""
+        if error_history and len(error_history) > 1:
+            past = error_history[:-1]  # Exclude current error (already in {error})
+            history_lines = [
+                f"Attempt {h['iteration']}: SQL='{h['sql'][:100]}...' -> Error: {h['error'][:150]}"
+                for h in past
+            ]
+            history_str = "Previous failed attempts (DO NOT repeat these mistakes):\n" + "\n".join(history_lines) + "\n\n"
+
         prompt = REFINEMENT_PROMPT["user_template"].format(
             sql=sql,
             error=error,
+            error_history=history_str,
             schema=schema_str,
             question=nl_query
+        )
+
+        # T-100: dialect-aware system prompt for refinement
+        system_prompt = _build_system_prompt(
+            extra=REFINEMENT_PROMPT["system"],
+            dialect=self.db_type
         )
 
         try:
             response = self.llm_client.complete(
                 prompt=prompt,
-                system_prompt=REFINEMENT_PROMPT["system"],
+                system_prompt=system_prompt,
                 max_tokens=1024
             )
             return self._extract_sql(response)
@@ -188,10 +286,16 @@ class SQLExecutor:
             errors=errors_str
         )
 
+        # T-100: dialect-aware system prompt for last resort
+        system_prompt = _build_system_prompt(
+            extra=LAST_RESORT_PROMPT["system"],
+            dialect=self.db_type
+        )
+
         try:
             response = self.llm_client.complete(
                 prompt=prompt,
-                system_prompt=LAST_RESORT_PROMPT["system"],
+                system_prompt=system_prompt,
                 max_tokens=2048
             )
             sql = self._extract_sql(response)

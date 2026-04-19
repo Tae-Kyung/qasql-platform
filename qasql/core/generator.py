@@ -7,9 +7,10 @@ Generates SQL candidates using multiple context strategies.
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
-from qasql.core.prompts import PROMPTS, ContextStrategy
+from qasql.core.prompts import PROMPTS, ContextStrategy, get_system_prompt
+from qasql.core.few_shot import format_few_shot_section
 
 
 @dataclass
@@ -31,10 +32,12 @@ class CandidateGenerator:
     - minimal_profile: Column names only
     - focused_schema: Filtered relevant tables
     - full_profile: Schema with descriptions
+    - cot_focused: Chain-of-Thought with focused schema (T-111)
     """
 
-    def __init__(self, llm_client: Any):
+    def __init__(self, llm_client: Any, db_type: str = "sqlite"):
         self.llm_client = llm_client
+        self.db_type = db_type
 
     def generate_all_candidates(
         self,
@@ -43,13 +46,12 @@ class CandidateGenerator:
         focused_schema: dict[str, Any],
         profile: dict[str, Any],
         hint: str = "",
-        parallel: bool = True
+        parallel: bool = True,
+        few_shot_examples: Optional[list[dict]] = None,
+        join_hints: Optional[list[str]] = None,
     ) -> list[SQLCandidate]:
         """
         Generate SQL candidates using all applicable strategies.
-
-        If hint is not provided, SME strategy is skipped (4 candidates).
-        If hint is provided, all 5 strategies are used.
 
         Args:
             nl_query: Natural language query
@@ -58,11 +60,16 @@ class CandidateGenerator:
             profile: Column descriptions
             hint: Optional SME hint
             parallel: Whether to generate in parallel
+            few_shot_examples: T-110 few-shot examples to prepend to prompts
+            join_hints: T-112 JOIN condition hints from schema graph
 
         Returns:
             List of SQL candidates
         """
-        # Determine which strategies to use
+        self._few_shot_examples = few_shot_examples or []
+        self._join_hints = join_hints or []
+
+        # Determine which strategies to use (T-111: +COT_FOCUSED)
         if hint:
             strategies = [
                 ContextStrategy.FULL_SCHEMA,
@@ -70,14 +77,15 @@ class CandidateGenerator:
                 ContextStrategy.MINIMAL_PROFILE,
                 ContextStrategy.FOCUSED_SCHEMA,
                 ContextStrategy.FULL_PROFILE,
+                ContextStrategy.COT_FOCUSED,
             ]
         else:
-            # Skip SME when no hint
             strategies = [
                 ContextStrategy.FULL_SCHEMA,
                 ContextStrategy.MINIMAL_PROFILE,
                 ContextStrategy.FOCUSED_SCHEMA,
                 ContextStrategy.FULL_PROFILE,
+                ContextStrategy.COT_FOCUSED,
             ]
 
         if parallel:
@@ -144,14 +152,22 @@ class CandidateGenerator:
         prompt_config = PROMPTS[strategy]
 
         # Build schema string based on strategy
-        if strategy == ContextStrategy.FOCUSED_SCHEMA:
+        if strategy in (ContextStrategy.FOCUSED_SCHEMA, ContextStrategy.COT_FOCUSED):
             schema_str = self._format_schema(focused_schema.get("tables", schema))
         elif strategy == ContextStrategy.MINIMAL_PROFILE:
             schema_str = self._format_minimal(schema)
         elif strategy == ContextStrategy.FULL_PROFILE:
-            schema_str = self._format_with_profile(schema, profile)
+            schema_str = self._format_with_profile_and_samples(schema, profile)
         else:
             schema_str = self._format_schema(schema)
+
+        # T-112: Append JOIN hints to schema string for strategies that benefit
+        if self._join_hints and strategy in (
+            ContextStrategy.FOCUSED_SCHEMA, ContextStrategy.COT_FOCUSED,
+            ContextStrategy.FULL_SCHEMA,
+        ):
+            schema_str += "\n\nSuggested JOIN paths:\n"
+            schema_str += "\n".join(f"  {h}" for h in self._join_hints)
 
         # Build user prompt
         user_prompt = prompt_config["user_template"].format(
@@ -160,12 +176,22 @@ class CandidateGenerator:
             hint=hint
         )
 
+        # T-110: Prepend few-shot examples (for non-CoT strategies)
+        if self._few_shot_examples and strategy != ContextStrategy.COT_FOCUSED:
+            few_shot_section = format_few_shot_section(self._few_shot_examples)
+            if few_shot_section:
+                user_prompt = few_shot_section + "\n" + user_prompt
+
+        # T-100: dialect-aware system prompt, T-102: per-strategy temperature
+        system_prompt = get_system_prompt(strategy, dialect=self.db_type)
+        temperature = prompt_config.get("temperature", 0.0)
+
         try:
             response = self.llm_client.complete(
                 prompt=user_prompt,
-                system_prompt=prompt_config["system"],
+                system_prompt=system_prompt,
                 max_tokens=2048,
-                temperature=0.0
+                temperature=temperature
             )
             sql = self._extract_sql(response)
         except Exception as e:
@@ -229,6 +255,50 @@ class CandidateGenerator:
                     lines.append(f"  {col_name} ({col_type}): {desc}")
                 else:
                     lines.append(f"  {col_name} ({col_type})")
+
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _format_with_profile_and_samples(self, schema: dict, profile: dict) -> str:
+        """Format schema with descriptions, distinct values, and sample rows (T-101)."""
+        lines = []
+        profile_tables = profile.get("tables", {})
+
+        for table_name, table_info in schema.items():
+            table_profile = profile_tables.get(table_name, {})
+            profile_cols = {c["name"]: c for c in table_profile.get("columns", [])}
+
+            lines.append(f"Table: {table_name}")
+
+            for col in table_info.get("columns", []):
+                col_name = col["name"]
+                col_type = col.get("type", "TEXT")
+                desc = profile_cols.get(col_name, {}).get("description", "")
+
+                col_str = f"  {col_name} ({col_type})"
+                if desc:
+                    col_str += f": {desc}"
+
+                # Include distinct values (up to 5) for TEXT-like columns
+                distinct = col.get("distinct_values") or profile_cols.get(col_name, {}).get("distinct_values")
+                if distinct:
+                    vals = distinct[:5]
+                    col_str += f"  -- e.g., {', '.join(repr(v) for v in vals)}"
+
+                lines.append(col_str)
+
+            # Include sample rows (up to 3)
+            samples = table_info.get("sample_rows", [])
+            if samples:
+                col_names = [c["name"] for c in table_info.get("columns", [])]
+                lines.append(f"  Sample data ({min(len(samples), 3)} rows):")
+                for row in samples[:3]:
+                    parts = []
+                    for i, v in enumerate(row):
+                        if i < len(col_names):
+                            parts.append(f"{col_names[i]}={repr(v)}")
+                    lines.append(f"    ({', '.join(parts)})")
 
             lines.append("")
 

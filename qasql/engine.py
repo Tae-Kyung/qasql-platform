@@ -28,6 +28,8 @@ from qasql.database import DatabaseConnector, BaseDatabaseConnector
 from qasql.result import QueryResult, SetupResult, CandidateSQL
 from qasql.llm import create_llm_client, BaseLLMClient
 from qasql.core import SchemaAgent, CandidateGenerator, SQLExecutor, SQLJudge
+from qasql.core.few_shot import QueryClassifier, get_relevant_examples
+from qasql.core.cache import QueryCache
 
 
 class QASQLEngine:
@@ -128,6 +130,7 @@ class QASQLEngine:
         self._profile: Optional[dict] = None
         self._database_name: Optional[str] = None
         self._initialized = False
+        self._query_cache: Optional[QueryCache] = None
 
     def _create_llm_client(self) -> BaseLLMClient:
         """Create LLM client based on configuration."""
@@ -168,6 +171,10 @@ class QASQLEngine:
                 self._profile = json.load(f)
 
             self._initialized = True
+
+            # T-114: Initialize query cache
+            cache_dir = output_dir / "cache"
+            self._query_cache = QueryCache(cache_dir=cache_dir)
 
             return SetupResult(
                 success=True,
@@ -238,6 +245,10 @@ class QASQLEngine:
             json.dump(self._profile, f, indent=2, ensure_ascii=False, cls=_JSONEncoder)
 
         self._initialized = True
+
+        # T-114: Initialize query cache
+        cache_dir = output_dir / "cache"
+        self._query_cache = QueryCache(cache_dir=cache_dir)
 
         return SetupResult(
             success=True,
@@ -375,15 +386,24 @@ Write ONLY the description."""
 
         Returns:
             QueryResult with generated SQL and metadata
-
-        Note:
-            If hint is not provided, SME strategy is skipped (4 candidates).
-            If hint is provided, all 5 strategies are used.
         """
         self._ensure_initialized()
 
+        # T-114: Check cache first
+        if self._query_cache:
+            cached = self._query_cache.get(question, hint or "")
+            if cached:
+                return QueryResult(
+                    sql=cached.sql,
+                    confidence=cached.confidence,
+                    question=question,
+                    hint=hint,
+                    reasoning=cached.reasoning,
+                    metadata={"cache_hit": True},
+                )
+
         start_time = time.perf_counter()
-        metadata = {"timings": {}}
+        metadata = {"timings": {}, "cache_hit": False}
 
         # Stage 1: Schema Agent
         t0 = time.perf_counter()
@@ -397,34 +417,62 @@ Write ONLY the description."""
         )
         metadata["timings"]["schema_agent_ms"] = (time.perf_counter() - t0) * 1000
 
-        # Stage 2: Generate Candidates
+        # T-112: Extract join hints from schema agent
+        join_hints = focused_schema.get("join_hints", [])
+
+        # Stage 1.5: Query classification for few-shot (T-110)
         t0 = time.perf_counter()
-        generator = CandidateGenerator(self.llm_client)
+        try:
+            classifier = QueryClassifier(self.llm_client)
+            categories = classifier.classify(question)
+            few_shot_examples = get_relevant_examples(categories, max_examples=3)
+            metadata["query_categories"] = categories
+        except Exception:
+            few_shot_examples = []
+        metadata["timings"]["classification_ms"] = (time.perf_counter() - t0) * 1000
+
+        # Stage 2: Generate Candidates (T-110 few-shot + T-111 CoT + T-112 join hints)
+        t0 = time.perf_counter()
+        generator = CandidateGenerator(self.llm_client, db_type=self.config.db_type)
         candidates = generator.generate_all_candidates(
             nl_query=question,
             schema=self._schema,
             focused_schema=focused_schema,
             profile=self._profile,
             hint=hint or "",
-            parallel=True
+            parallel=True,
+            few_shot_examples=few_shot_examples,
+            join_hints=join_hints,
         )
         metadata["timings"]["generation_ms"] = (time.perf_counter() - t0) * 1000
 
-        # Stage 3: Execute Candidates
+        # Stage 3: Execute Candidates (T-113: parallel for non-SQLite)
         t0 = time.perf_counter()
         executor = SQLExecutor(
             db_connector=self.db_connector,
             llm_client=self.llm_client,
             max_iterations=self.config.max_refinement_attempts,
-            query_timeout=self.config.query_timeout
+            query_timeout=self.config.query_timeout,
+            db_type=self.config.db_type,
+            connector_factory=self._create_db_connector,
         )
 
         schema_str = self._format_schema_str()
-        execution_results = executor.execute_all_candidates(
-            candidates=candidates,
-            nl_query=question,
-            schema_str=schema_str
-        )
+        parallel_execution = self.config.db_type in ("postgresql", "mysql", "supabase")
+        if parallel_execution:
+            execution_results = executor.execute_all_candidates_parallel(
+                candidates=candidates,
+                nl_query=question,
+                schema_str=schema_str,
+            )
+            metadata["parallel_execution"] = True
+        else:
+            execution_results = executor.execute_all_candidates(
+                candidates=candidates,
+                nl_query=question,
+                schema_str=schema_str,
+            )
+            metadata["parallel_execution"] = False
         metadata["timings"]["execution_ms"] = (time.perf_counter() - t0) * 1000
 
         # Stage 3b: Last Resort
@@ -439,12 +487,12 @@ Write ONLY the description."""
             )
             if last_resort and last_resort.success:
                 execution_results.append(last_resort)
-                from qasql.core.generator import SQLCandidate
-                from qasql.core.prompts import ContextStrategy
-                candidates.append(SQLCandidate(
+                from qasql.core.generator import SQLCandidate as _SC
+                from qasql.core.prompts import ContextStrategy as _CS
+                candidates.append(_SC(
                     candidate_id=0,
                     sql=last_resort.sql,
-                    strategy=ContextStrategy.FULL_SCHEMA,
+                    strategy=_CS.FULL_SCHEMA,
                     strategy_name="last_resort"
                 ))
                 metadata["last_resort_used"] = True
@@ -475,7 +523,7 @@ Write ONLY the description."""
                 error=exec_r.error if exec_r and not exec_r.success else None
             ))
 
-        return QueryResult(
+        result = QueryResult(
             sql=judgment.selected_sql,
             confidence=judgment.confidence,
             question=question,
@@ -486,6 +534,16 @@ Write ONLY the description."""
             total_candidates=judgment.total_candidates,
             metadata=metadata
         )
+
+        # T-114: Store in cache
+        if self._query_cache and judgment.confidence >= 0.5:
+            self._query_cache.put(
+                question, hint or "",
+                judgment.selected_sql, judgment.confidence,
+                judgment.reasoning
+            )
+
+        return result
 
     def _format_schema_str(self) -> str:
         """Format schema as string for prompts."""
@@ -519,3 +577,15 @@ Write ONLY the description."""
         """Get list of table names."""
         self._ensure_initialized()
         return list(self._schema.keys())
+
+    # --- T-114: Cache management ---
+
+    def clear_cache(self):
+        """Clear all cached query results."""
+        if self._query_cache:
+            self._query_cache.clear()
+
+    def invalidate_cache(self, question: str, hint: str = ""):
+        """Remove a specific query from cache."""
+        if self._query_cache:
+            self._query_cache.remove(question, hint)

@@ -1119,3 +1119,1294 @@ T-000 (Supabase 셋업)
 ---
 
 *각 태스크는 완료 후 `[x]`로 표시한다. 블로커 발생 시 `[!]`로 표시하고 이유를 주석으로 기록한다.*
+
+---
+
+## PHASE 10 — QA-SQL 엔진 정확도 및 성능 향상 (Phase A: 즉시 적용)
+
+> 목적: `qasql/` 파이프라인의 NL-to-SQL 정확도와 성능을 단계적으로 개선한다.
+> 상세 분석: `research/future_study.md` 참조.
+> Phase A는 기존 코드에 최소 변경으로 즉시 효과를 낼 수 있는 개선에 집중한다.
+> **원칙**: 각 태스크 완료 후 기존 동작이 깨지지 않았는지 회귀 검증한다.
+
+**필요 스킬**: Python, LLM 프롬프트 엔지니어링, SQL 방언 지식
+
+---
+
+### T-100 DB 방언(Dialect) 인식 프롬프트
+
+> 참조: `future_study.md` §2.2.5
+> 대상 파일: `qasql/core/prompts.py`, `qasql/core/generator.py`, `qasql/engine.py`
+
+- [x] **T-100-1** `qasql/core/prompts.py`에 `DIALECT_HINTS` 딕셔너리 추가
+  ```python
+  DIALECT_HINTS = {
+      "sqlite": "Use SQLite syntax. No FULL OUTER JOIN. Use || for string concatenation. Date functions: date(), strftime(). Use LIMIT (no FETCH/OFFSET syntax). CAST() for type conversion.",
+      "postgresql": "Use PostgreSQL syntax. Use :: for type casting. String concat with ||. Date functions: DATE_TRUNC(), EXTRACT(), TO_CHAR(). Window functions supported. Use ILIKE for case-insensitive LIKE.",
+      "mysql": "Use MySQL syntax. Use CONCAT() for string concatenation. Use LIMIT (not FETCH). Date functions: DATE_FORMAT(), DATEDIFF(), NOW(). Use backticks for reserved word escaping. No FULL OUTER JOIN.",
+      "supabase": "Use PostgreSQL syntax (Supabase uses PostgreSQL). Use :: for type casting. String concat with ||. Date functions: DATE_TRUNC(), EXTRACT(), TO_CHAR(). Window functions supported.",
+  }
+  ```
+- [x] **T-100-2** `PROMPTS` 딕셔너리의 `SYSTEM_BASE` 및 각 전략 `system` 프롬프트에 `{dialect_hint}` 플레이스홀더 추가
+  - 기존 하드코딩된 system 프롬프트를 동적 포맷으로 변경
+  - `SYSTEM_BASE` 끝에 `\n\nSQL Dialect: {dialect_hint}` 추가
+- [x] **T-100-3** `CandidateGenerator.__init__()`에 `db_type` 파라미터 추가
+  - `_generate_candidate()` 내부에서 `prompt_config["system"]`에 dialect hint 삽입
+- [x] **T-100-4** `QASQLEngine.query()`에서 `CandidateGenerator` 생성 시 `self.config.db_type` 전달
+  - `engine.py:402` 부근 `generator = CandidateGenerator(self.llm_client)` → `CandidateGenerator(self.llm_client, db_type=self.config.db_type)`
+- [x] **T-100-5** `REFINEMENT_PROMPT`, `LAST_RESORT_PROMPT`에도 동일하게 dialect hint 삽입
+  - `SQLExecutor.__init__()`에 `db_type` 파라미터 추가
+  - `engine.py`에서 Executor 생성 시 `db_type` 전달
+
+**검증**:
+- SQLite DB로 쿼리 시 system 프롬프트에 "Use SQLite syntax" 포함 확인
+- PostgreSQL DB로 쿼리 시 "Use PostgreSQL syntax" 포함 확인
+- 기존 테스트 쿼리 회귀 — 정상 동작 확인
+
+---
+
+### T-101 샘플 데이터 프롬프트 포함
+
+> 참조: `future_study.md` §2.2.4
+> 대상 파일: `qasql/core/generator.py`, `qasql/core/prompts.py`
+
+- [x] **T-101-1** `CandidateGenerator`에 `_format_with_samples()` 메서드 추가
+  ```python
+  def _format_with_samples(self, schema: dict) -> str:
+      """Format schema with sample rows for LLM context."""
+      lines = []
+      for table_name, table_info in schema.items():
+          lines.append(f"Table: {table_name}")
+          for col in table_info.get("columns", []):
+              col_str = f"  {col['name']} ({col.get('type', 'TEXT')})"
+              # distinct_values가 있으면 값 예시 추가
+              if col.get("distinct_values"):
+                  vals = col["distinct_values"][:5]
+                  col_str += f"  -- e.g., {', '.join(repr(v) for v in vals)}"
+              lines.append(col_str)
+          # sample_rows 추가 (최대 3행)
+          samples = table_info.get("sample_rows", [])
+          if samples:
+              col_names = [c["name"] for c in table_info.get("columns", [])]
+              lines.append(f"  Sample rows ({len(samples)}):")
+              for row in samples[:3]:
+                  row_str = ", ".join(f"{col_names[i]}={repr(v)}" for i, v in enumerate(row) if i < len(col_names))
+                  lines.append(f"    ({row_str})")
+          lines.append("")
+      return "\n".join(lines)
+  ```
+- [x] **T-101-2** 새로운 전략 `SCHEMA_WITH_SAMPLES` 추가 또는 기존 `FULL_SCHEMA` 전략이 샘플 데이터를 포함하도록 변경
+  - **결정**: 기존 `FULL_SCHEMA` 전략은 유지하고, `FULL_PROFILE` 전략에 샘플 데이터를 추가하는 방식 채택 (프롬프트 크기 관리)
+  - `_generate_candidate()`에서 `FULL_PROFILE` 전략일 때 `_format_with_samples()` 사용
+- [x] **T-101-3** `_format_with_profile()` → `_format_with_profile_and_samples()` 리팩터링
+  - 기존 profile 정보 + 샘플 데이터 + distinct values 통합
+  - 프롬프트 토큰 제한 고려: 테이블당 최대 3 sample rows, distinct values는 5개까지만
+- [x] **T-101-4** `FOCUSED_SCHEMA` 전략에도 샘플 데이터 포함 옵션 추가
+  - focused_schema에 해당하는 테이블의 sample_rows를 프롬프트에 삽입
+  - `_format_focused_with_samples()` 메서드 추가
+
+**검증**:
+- 생성된 프롬프트에 sample rows 포함 확인 (로그 또는 디버그 출력)
+- 날짜 포맷이 있는 DB에서 쿼리 시 올바른 날짜 형식 사용 확인
+- 프롬프트 토큰 수가 모델 제한(llama3.2:3b = 128K) 이내 확인
+
+---
+
+### T-102 전략별 Temperature 차등 적용
+
+> 참조: `future_study.md` §2.2.2
+> 대상 파일: `qasql/core/prompts.py`, `qasql/core/generator.py`
+
+- [x] **T-102-1** `qasql/core/prompts.py`의 각 `PROMPTS` 항목에 `temperature` 필드 추가
+  ```python
+  ContextStrategy.FULL_SCHEMA: {
+      "name": "full_schema",
+      "temperature": 0.0,    # 정밀한 기본 후보
+      ...
+  },
+  ContextStrategy.SME_METADATA: {
+      "name": "sme_metadata",
+      "temperature": 0.0,    # hint 기반은 정확하게
+      ...
+  },
+  ContextStrategy.MINIMAL_PROFILE: {
+      "name": "minimal_profile",
+      "temperature": 0.2,    # 약간의 다양성
+      ...
+  },
+  ContextStrategy.FOCUSED_SCHEMA: {
+      "name": "focused_schema",
+      "temperature": 0.1,    # 미세 변동
+      ...
+  },
+  ContextStrategy.FULL_PROFILE: {
+      "name": "full_profile",
+      "temperature": 0.3,    # 프로파일 기반 탐색
+      ...
+  },
+  ```
+- [x] **T-102-2** `CandidateGenerator._generate_candidate()` 수정
+  - `generator.py:168` — `temperature=0.0` 하드코딩 → `temperature=prompt_config.get("temperature", 0.0)` 으로 변경
+- [x] **T-102-3** 회귀 테스트: 동일 질문에 대해 5개 후보 SQL이 이전보다 더 다양한지 비교
+  - 후보 SQL 간 편집 거리(Levenshtein distance) 계산하여 다양성 정량화
+
+**검증**:
+- `FULL_SCHEMA`(temp=0.0)과 `FULL_PROFILE`(temp=0.3)이 서로 다른 SQL 생성 확인
+- 동일 질문 5회 반복 시 temp>0 전략에서 미세한 변동 발생 확인
+- 기존 대비 후보 다양성(고유 SQL 수) 증가 확인
+
+---
+
+### T-103 누적 에러 히스토리 기반 리파인먼트
+
+> 참조: `future_study.md` §2.3.2
+> 대상 파일: `qasql/core/executor.py`, `qasql/core/prompts.py`
+
+- [x] **T-103-1** `REFINEMENT_PROMPT`의 `user_template` 확장
+  - `{error_history}` 플레이스홀더 추가
+  ```python
+  REFINEMENT_PROMPT = {
+      "system": """...""",
+      "user_template": """Original SQL:
+  {sql}
+
+  Current Error:
+  {error}
+
+  Previous Attempts (DO NOT repeat these mistakes):
+  {error_history}
+
+  Schema:
+  {schema}
+
+  Question: {question}
+
+  Return only the corrected SQL query."""
+  }
+  ```
+- [x] **T-103-2** `SQLExecutor._execute_with_retry()` 수정
+  - `error_history: list[dict]` 누적 리스트 도입
+  - 각 반복에서 `{"iteration": i, "sql": sql[:200], "error": error}` 를 히스토리에 추가
+  - `_refine_sql()` 호출 시 히스토리 전달
+  ```python
+  def _execute_with_retry(self, candidate, nl_query, schema_str):
+      sql = candidate.sql
+      error_history = []
+
+      for iteration in range(1, self.max_iterations + 1):
+          try:
+              # ... 실행 ...
+          except Exception as e:
+              error_history.append({
+                  "iteration": iteration,
+                  "sql": sql[:200],
+                  "error": str(e)
+              })
+              if iteration < self.max_iterations:
+                  refined_sql = self._refine_sql(
+                      sql, str(e), schema_str, nl_query, error_history
+                  )
+  ```
+- [x] **T-103-3** `SQLExecutor._refine_sql()` 시그니처 변경
+  - `error_history` 파라미터 추가
+  - 히스토리를 포맷팅하여 프롬프트에 삽입
+  ```python
+  def _refine_sql(self, sql, error, schema_str, nl_query, error_history=None):
+      history_str = ""
+      if error_history and len(error_history) > 1:
+          history_str = "\n".join([
+              f"Attempt {h['iteration']}: SQL='{h['sql'][:100]}...' → Error: {h['error'][:150]}"
+              for h in error_history[:-1]  # 현재 에러 제외
+          ])
+      prompt = REFINEMENT_PROMPT["user_template"].format(
+          sql=sql, error=error, error_history=history_str,
+          schema=schema_str, question=nl_query
+      )
+  ```
+
+**검증**:
+- 의도적으로 잘못된 테이블명을 포함한 SQL에서 3회 리파인 시, 이전 에러와 동일한 실수 반복하지 않음 확인
+- 리파인 로그에 히스토리 포함 확인
+
+---
+
+### T-104 Judge 실행 결과 기반 판단
+
+> 참조: `future_study.md` §2.4.1
+> 대상 파일: `qasql/core/judge.py`, `qasql/core/prompts.py`
+
+- [x] **T-104-1** `JUDGE_PROMPT`의 `system` 프롬프트 확장
+  - 실행 결과 정보를 평가 기준에 추가
+  ```python
+  JUDGE_PROMPT = {
+      "system": """You are a Senior SQL Reviewer. Your job is to select the BEST SQL query from multiple candidates.
+
+  Evaluate each candidate based on:
+  1. Correctness - Does it answer the question?
+  2. Result shape - Does the number of rows/columns make sense for the question?
+     - Aggregation questions should return few rows
+     - List questions should return multiple rows
+     - Count questions should return a single number
+  3. Completeness - Does it include all required columns?
+  4. Efficiency - Is it well-structured?
+  5. Result data - Do the sample output values look reasonable?
+
+  Return your selection in JSON format:
+  {
+      "selected_id": <candidate_id>,
+      "confidence": <0.0-1.0>,
+      "reasoning": "<brief explanation>"
+  }""",
+      ...
+  }
+  ```
+- [x] **T-104-2** `SQLJudge._llm_judge()` 메서드 수정 — 후보 텍스트에 실행 결과 요약 추가
+  ```python
+  def _llm_judge(self, successful, nl_query, hint, total_candidates):
+      candidates_text = []
+      for candidate, exec_result in successful:
+          text = f"Option {candidate.candidate_id} ({candidate.strategy_name}):\n"
+          text += f"SQL: {exec_result.sql}\n"
+          # 실행 결과 요약 추가
+          row_count = len(exec_result.rows) if exec_result.rows else 0
+          text += f"Result: {row_count} rows, columns: {exec_result.columns}\n"
+          if exec_result.rows and len(exec_result.rows) > 0:
+              # 첫 3행만 샘플로 포함 (데이터 크기 제한)
+              sample_rows = exec_result.rows[:3]
+              text += f"Sample output:\n"
+              for row in sample_rows:
+                  text += f"  {row}\n"
+          candidates_text.append(text)
+  ```
+- [x] **T-104-3** `SQLJudge.judge()` 시그니처는 변경 불필요 — `execution_results`에 이미 `rows`, `columns` 포함
+  - `ExecutionResult.rows`가 너무 클 때(>100행) 잘라내는 안전장치 추가
+  ```python
+  # 결과 요약 시 최대 행 수 제한
+  MAX_SAMPLE_ROWS_FOR_JUDGE = 5
+  MAX_ROW_STR_LENGTH = 200  # 각 행의 문자열 길이 제한
+  ```
+- [x] **T-104-4** Judge 프롬프트에 "질문 유형 힌트" 추가
+  - 집계 질문이면 "This appears to be an aggregation question — expect few rows"
+  - 목록 질문이면 "This appears to be a listing question — expect multiple rows"
+  - 쿼리 분해 단계(`schema_agent._decompose_query()`)의 결과를 Judge에게도 전달
+
+**검증**:
+- "총 매출 합계는?" 질문 → 1행 반환하는 후보 선택 확인 (vs 전체 행 반환 후보)
+- "모든 고객 목록" 질문 → 다수 행 반환하는 후보 선택 확인
+- Judge 프롬프트에 실행 결과 포함 확인 (로그)
+
+---
+
+### PHASE 10 검증 체크포인트
+
+> 아래 항목을 모두 통과해야 PHASE 11로 진행할 수 있다.
+
+- [ ] **CHK-10-1** SQLite DB 쿼리 시 프롬프트에 "Use SQLite syntax" 포함, PostgreSQL 시 "Use PostgreSQL syntax" 포함
+- [ ] **CHK-10-2** 프롬프트에 sample rows 및 distinct values 포함 (FULL_PROFILE 전략에서)
+- [ ] **CHK-10-3** 5개 후보 SQL 중 최소 2개가 서로 다른 SQL 생성 (Temperature 다양성)
+- [ ] **CHK-10-4** 리파인 3회차 프롬프트에 1, 2회차 에러 히스토리 포함
+- [ ] **CHK-10-5** Judge 프롬프트에 "Result: N rows, columns: [...]" 정보 포함
+- [ ] **CHK-10-6** 기존 단순 쿼리("Show all customers") 회귀 — 여전히 정상 SQL 생성
+- [ ] **CHK-10-7** 기존 복잡 쿼리("Show total sales by customer") 회귀 — 여전히 정상 SQL 생성
+- [ ] **CHK-10-8** `engine.query()` 호출 시 에러 없이 `QueryResult` 반환 (모든 변경 통합 후)
+
+---
+
+## PHASE 11 — QA-SQL 엔진 정확도 향상 (Phase B: 중기 개선)
+
+> 목적: Few-shot, CoT, 스키마 그래프 등 중간 규모 변경으로 정확도를 본격적으로 높인다.
+> Phase A(PHASE 10) 완료 후 진행한다.
+> **원칙**: 새 모듈은 기존 파이프라인과 느슨하게 결합하여 독립 테스트 가능하게 설계한다.
+
+**필요 스킬**: Python, 그래프 알고리즘(BFS), LLM 프롬프트 엔지니어링, threading, 캐싱 설계
+
+---
+
+### T-110 Few-Shot 예시 라이브러리 구축
+
+> 참조: `future_study.md` §2.2.1
+> 대상 파일: 신규 `qasql/core/few_shot.py`, `qasql/core/prompts.py`, `qasql/core/generator.py`
+
+- [x] **T-110-1** `qasql/core/few_shot.py` 신규 파일 생성 — Few-shot 예시 저장소
+  ```python
+  # 쿼리 패턴별 few-shot 예시 딕셔너리
+  FEW_SHOT_EXAMPLES = {
+      "simple_select": [
+          {"question": "Show all customers", "sql": "SELECT * FROM customers"},
+          {"question": "List product names", "sql": "SELECT name FROM products"},
+      ],
+      "aggregation": [
+          {"question": "Total sales by region", "sql": "SELECT region, SUM(amount) FROM orders GROUP BY region"},
+          {"question": "Average order value", "sql": "SELECT AVG(total) FROM orders"},
+          {"question": "Count of active users", "sql": "SELECT COUNT(*) FROM users WHERE status = 'active'"},
+      ],
+      "join": [
+          {"question": "Orders with customer names", "sql": "SELECT c.name, o.* FROM orders o JOIN customers c ON o.customer_id = c.id"},
+      ],
+      "subquery": [
+          {"question": "Customers with above-average orders", "sql": "SELECT * FROM customers WHERE id IN (SELECT customer_id FROM orders GROUP BY customer_id HAVING COUNT(*) > (SELECT AVG(cnt) FROM (SELECT COUNT(*) as cnt FROM orders GROUP BY customer_id) t))"},
+      ],
+      "window_function": [
+          {"question": "Rank products by sales", "sql": "SELECT name, sales, RANK() OVER (ORDER BY sales DESC) as rank FROM products"},
+      ],
+      "date_filter": [
+          {"question": "Orders from last month", "sql": "SELECT * FROM orders WHERE order_date >= DATE('now', '-1 month')"},
+      ],
+      "case_when": [
+          {"question": "Categorize sales as high/low", "sql": "SELECT *, CASE WHEN amount > 1000 THEN 'high' ELSE 'low' END as category FROM sales"},
+      ],
+  }
+  ```
+- [x] **T-110-2** `QueryClassifier` 클래스 작성 — LLM으로 질문의 쿼리 패턴 분류
+  ```python
+  class QueryClassifier:
+      def __init__(self, llm_client):
+          self.llm_client = llm_client
+
+      def classify(self, nl_query: str) -> list[str]:
+          """질문을 쿼리 패턴으로 분류. 복수 패턴 반환 가능."""
+          prompt = f"""Classify this database question into one or more categories.
+  Categories: simple_select, aggregation, join, subquery, window_function, date_filter, case_when
+
+  Question: "{nl_query}"
+
+  Return only the category names, comma-separated."""
+          response = self.llm_client.complete(prompt=prompt, max_tokens=50)
+          return [c.strip() for c in response.split(",")]
+  ```
+- [x] **T-110-3** `get_relevant_examples()` 함수 작성 — 분류 결과에 따라 관련 few-shot 예시 선택
+  ```python
+  def get_relevant_examples(categories: list[str], max_examples: int = 3) -> list[dict]:
+      """카테고리에 해당하는 few-shot 예시를 최대 max_examples개 선택"""
+      examples = []
+      for cat in categories:
+          if cat in FEW_SHOT_EXAMPLES:
+              examples.extend(FEW_SHOT_EXAMPLES[cat][:2])
+      return examples[:max_examples]
+  ```
+- [x] **T-110-4** `CandidateGenerator._generate_candidate()` 수정 — few-shot 예시를 프롬프트에 삽입
+  - `FULL_SCHEMA`, `FOCUSED_SCHEMA` 전략에 few-shot 섹션 추가
+  ```python
+  # user_prompt 생성 시 few-shot 예시 삽입
+  if few_shot_examples:
+      examples_str = "\n".join([
+          f"Q: {ex['question']}\nSQL: {ex['sql']}" for ex in few_shot_examples
+      ])
+      user_prompt = f"Examples:\n{examples_str}\n\n" + user_prompt
+  ```
+- [x] **T-110-5** `QASQLEngine.query()` 수정 — 쿼리 분류 단계를 Stage 1.5로 추가
+  - Schema Agent 직후, Candidate Generation 직전에 분류 수행
+  - 분류 결과를 `CandidateGenerator.generate_all_candidates()`에 전달
+
+**검증**:
+- "총 매출 합계" 질문 → `aggregation` 카테고리로 분류 확인
+- 프롬프트에 관련 few-shot 예시 포함 확인
+- 복잡한 JOIN 질문에서 few-shot 유무에 따른 정확도 비교 (수동)
+
+---
+
+### T-111 Chain-of-Thought (CoT) 프롬프트 도입
+
+> 참조: `future_study.md` §2.2.3
+> 대상 파일: `qasql/core/prompts.py`
+
+- [x] **T-111-1** `COT_SYSTEM_PROMPT` 상수 추가 — CoT 유도 시스템 프롬프트
+  ```python
+  COT_SYSTEM_PROMPT = """You are an expert SQL query generator. Think step-by-step before writing the final SQL.
+
+  For each question, follow these steps:
+  Step 1: Identify the entities (tables) mentioned or implied in the question.
+  Step 2: Determine the required columns, aggregations, and computed fields.
+  Step 3: Identify the JOIN conditions between tables (using foreign keys).
+  Step 4: Determine the WHERE/HAVING filter conditions.
+  Step 5: Determine the ORDER BY and LIMIT clauses if needed.
+  Step 6: Write the final SQL query.
+
+  Rules:
+  1. Show your reasoning for each step briefly
+  2. After reasoning, output the final SQL inside ```sql ... ``` code block
+  3. Use exact column and table names from the schema
+  4. Do NOT use DISTINCT unless explicitly asked
+  {dialect_hint}"""
+  ```
+- [x] **T-111-2** `ContextStrategy.COT_FOCUSED` 신규 전략 추가 (기존 5개 + 1 = 6개)
+  - `ContextStrategy` Enum에 `COT_FOCUSED = "cot_focused"` 추가
+  - `PROMPTS` 딕셔너리에 CoT 전략 항목 추가
+  ```python
+  ContextStrategy.COT_FOCUSED: {
+      "name": "cot_focused",
+      "temperature": 0.0,
+      "system": COT_SYSTEM_PROMPT,
+      "user_template": """Database Schema (relevant tables only):
+  {schema}
+
+  Question: {question}
+
+  Think step-by-step and generate the SQL query."""
+  },
+  ```
+- [x] **T-111-3** `CandidateGenerator.generate_all_candidates()` 수정 — 전략 목록에 CoT 추가
+  - hint 없을 때: 4 → 5개 (기존 4 + COT_FOCUSED)
+  - hint 있을 때: 5 → 6개 (기존 5 + COT_FOCUSED)
+  - CoT 전략은 focused_schema 기반으로 동작
+- [x] **T-111-4** CoT 응답에서 SQL 추출 로직 보강 — reasoning 텍스트와 SQL을 분리
+  - `_extract_sql()` 이미 ```sql 블록을 추출하므로 추가 변경 최소화
+  - 단, reasoning 텍스트를 `SQLCandidate`에 `reasoning` 필드로 저장하여 디버깅 지원
+
+**검증**:
+- CoT 전략이 step-by-step 추론 후 SQL을 생성하는지 확인 (응답 텍스트 확인)
+- 추출된 SQL이 유효한지 확인 (실행 성공)
+- 후보 수가 의도대로 증가했는지 확인
+
+---
+
+### T-112 스키마 그래프 기반 JOIN 경로 탐색
+
+> 참조: `future_study.md` §2.1.1
+> 대상 파일: 신규 `qasql/core/schema_graph.py`, `qasql/core/schema_agent.py`, `qasql/engine.py`
+
+- [x] **T-112-1** `qasql/core/schema_graph.py` 신규 파일 생성
+  ```python
+  """
+  Schema Graph Module
+  FK 관계를 그래프로 모델링하여 JOIN 경로를 탐색한다.
+  """
+  from collections import defaultdict, deque
+  from itertools import combinations
+
+  class SchemaGraph:
+      def __init__(self, schema: dict):
+          self.adjacency = defaultdict(set)  # table -> {related_tables}
+          self.edges = {}  # (table_a, table_b) -> {"column": ..., "ref_column": ...}
+          self._build_graph(schema)
+
+      def _build_graph(self, schema: dict):
+          """FK 관계에서 양방향 그래프 구축"""
+          for table_name, table_info in schema.items():
+              for fk in table_info.get("foreign_keys", []):
+                  ref_table = fk["references_table"]
+                  self.adjacency[table_name].add(ref_table)
+                  self.adjacency[ref_table].add(table_name)
+                  self.edges[(table_name, ref_table)] = {
+                      "column": fk["column"],
+                      "ref_column": fk["references_column"]
+                  }
+                  self.edges[(ref_table, table_name)] = {
+                      "column": fk["references_column"],
+                      "ref_column": fk["column"]
+                  }
+
+      def find_join_path(self, table_a: str, table_b: str) -> list[str]:
+          """BFS로 두 테이블 간 최단 FK 경로 반환"""
+          # ... BFS 구현 ...
+
+      def expand_relevant_tables(self, tables: list[str]) -> list[str]:
+          """관련 테이블 쌍 간 브릿지 테이블 자동 포함"""
+          expanded = set(tables)
+          for a, b in combinations(tables, 2):
+              path = self.find_join_path(a, b)
+              if path and len(path) <= 4:  # 경로가 너무 길면 제외
+                  expanded.update(path)
+          return list(expanded)
+
+      def get_join_conditions(self, path: list[str]) -> list[str]:
+          """경로의 JOIN 조건 생성"""
+          # ... 인접 테이블 간 ON 절 생성 ...
+  ```
+- [x] **T-112-2** `SchemaGraph.find_join_path()` BFS 구현
+  ```python
+  def find_join_path(self, table_a: str, table_b: str) -> list[str]:
+      if table_a == table_b:
+          return [table_a]
+      if table_a not in self.adjacency or table_b not in self.adjacency:
+          return []
+
+      visited = {table_a}
+      queue = deque([(table_a, [table_a])])
+
+      while queue:
+          current, path = queue.popleft()
+          for neighbor in self.adjacency[current]:
+              if neighbor == table_b:
+                  return path + [neighbor]
+              if neighbor not in visited:
+                  visited.add(neighbor)
+                  queue.append((neighbor, path + [neighbor]))
+
+      return []  # 경로 없음
+  ```
+- [x] **T-112-3** `SchemaGraph.get_join_conditions()` 구현
+  ```python
+  def get_join_conditions(self, path: list[str]) -> list[str]:
+      """경로를 따라 JOIN ON 조건을 문자열 리스트로 반환"""
+      conditions = []
+      for i in range(len(path) - 1):
+          a, b = path[i], path[i + 1]
+          edge = self.edges.get((a, b))
+          if edge:
+              conditions.append(
+                  f"{a}.{edge['column']} = {b}.{edge['ref_column']}"
+              )
+      return conditions
+  ```
+- [x] **T-112-4** `SchemaAgent.run()` 수정 — 관련 테이블 확장 단계 추가
+  ```python
+  def run(self, nl_query, schema, profile, hint, relevance_threshold):
+      # ... 기존 점수 매기기 ...
+
+      # 관련 테이블 필터링 후, 브릿지 테이블 확장
+      from qasql.core.schema_graph import SchemaGraph
+      graph = SchemaGraph(schema)
+      expanded_tables = graph.expand_relevant_tables(list(relevant_tables.keys()))
+
+      # 확장된 테이블을 relevant_tables에 추가
+      for table_name in expanded_tables:
+          if table_name not in relevant_tables and table_name in schema:
+              relevant_tables[table_name] = schema[table_name]
+
+      # JOIN 경로 정보를 메타데이터에 포함
+      # ...
+  ```
+- [x] **T-112-5** JOIN 조건 정보를 `CandidateGenerator` 프롬프트에 포함
+  - `focused_schema`에 JOIN 힌트 섹션 추가
+  ```
+  Suggested JOIN paths:
+    orders.customer_id = customers.id
+    order_items.order_id = orders.id
+  ```
+- [x] **T-112-6** `qasql/core/__init__.py` 업데이트 — `SchemaGraph` export 추가
+- [x] **T-112-7** 엣지 케이스 처리
+  - FK가 없는 스키마 → 그래프 확장 단계 스킵
+  - 순환 참조 → BFS visited 체크로 무한루프 방지
+  - 경로 길이 제한 (max_path_length=4) → 너무 먼 테이블 제외
+
+**검증**:
+- 3개 테이블 체인(customers → orders → order_items)에서 customers, order_items만 관련으로 식별 시 orders 자동 포함 확인
+- FK가 없는 스키마에서 에러 없이 기존 동작 유지 확인
+- 프롬프트에 "Suggested JOIN paths" 섹션 포함 확인
+
+---
+
+### T-113 후보 SQL 병렬 실행
+
+> 참조: `future_study.md` §2.3.1
+> 대상 파일: `qasql/core/executor.py`, `qasql/database.py`, `qasql/engine.py`
+
+- [x] **T-113-1** `SQLExecutor`에 `execute_all_candidates_parallel()` 메서드 추가
+  ```python
+  from concurrent.futures import ThreadPoolExecutor, as_completed
+
+  def execute_all_candidates_parallel(
+      self, candidates, nl_query, schema_str, max_workers=None
+  ) -> list[ExecutionResult]:
+      max_workers = max_workers or min(len(candidates), 4)
+      results = [None] * len(candidates)
+
+      with ThreadPoolExecutor(max_workers=max_workers) as executor:
+          future_to_idx = {
+              executor.submit(
+                  self._execute_with_retry, c, nl_query, schema_str
+              ): i
+              for i, c in enumerate(candidates)
+          }
+          for future in as_completed(future_to_idx):
+              idx = future_to_idx[future]
+              try:
+                  results[idx] = future.result()
+              except Exception as e:
+                  results[idx] = ExecutionResult(
+                      candidate_id=candidates[idx].candidate_id,
+                      sql=candidates[idx].sql,
+                      success=False, error=str(e)
+                  )
+      return results
+  ```
+- [x] **T-113-2** `_execute_with_retry()` 수정 — 스레드 안전성 확보
+  - DB connector를 메서드 내에서 새로 생성 (공유 커넥션 사용 금지)
+  ```python
+  def _execute_with_retry(self, candidate, nl_query, schema_str):
+      # 스레드별 독립 커넥터 생성
+      local_connector = self._create_connector()
+      # ... 기존 로직 (self.db_connector → local_connector 교체) ...
+  ```
+- [x] **T-113-3** `SQLExecutor.__init__()` 수정 — 커넥터 팩토리 함수 추가
+  ```python
+  def __init__(self, db_connector, llm_client, max_iterations=3,
+               query_timeout=30.0, connector_factory=None):
+      self.db_connector = db_connector
+      self._connector_factory = connector_factory  # callable() -> BaseDatabaseConnector
+      # ...
+
+  def _create_connector(self):
+      if self._connector_factory:
+          return self._connector_factory()
+      return self.db_connector  # 폴백: 기존 방식
+  ```
+- [x] **T-113-4** `QASQLEngine.query()` 수정 — 커넥터 팩토리를 Executor에 전달
+  ```python
+  executor = SQLExecutor(
+      db_connector=self.db_connector,
+      llm_client=self.llm_client,
+      connector_factory=self._create_db_connector,  # 팩토리 함수 전달
+      ...
+  )
+  ```
+- [x] **T-113-5** DB 타입별 병렬 실행 가능 여부 판단
+  ```python
+  # SQLite: WAL mode가 아니면 읽기도 직렬화 → 병렬 비활성화
+  # PostgreSQL/MySQL: 병렬 가능
+  parallel_execution = self.config.db_type != "sqlite"
+  if parallel_execution:
+      execution_results = executor.execute_all_candidates_parallel(...)
+  else:
+      execution_results = executor.execute_all_candidates(...)
+  ```
+- [x] **T-113-6** 성능 측정 — 병렬 vs 순차 실행 시간 비교 로깅
+  - `metadata["timings"]["execution_ms"]`에서 차이 비교
+
+**검증**:
+- PostgreSQL DB에서 5개 후보 병렬 실행 → 순차 대비 2-3x 속도 향상 확인
+- SQLite DB에서 기존 순차 실행 유지 확인 (병렬 비활성)
+- 병렬 실행 시 결과 순서가 candidate_id 기준 정렬 확인
+- 스레드 안전성 — 동시 실행 중 DB 에러 없음 확인
+
+---
+
+### T-114 쿼리 캐싱 시스템
+
+> 참조: `future_study.md` §2.5.1
+> 대상 파일: 신규 `qasql/core/cache.py`, `qasql/engine.py`
+
+- [x] **T-114-1** `qasql/core/cache.py` 신규 파일 생성
+  ```python
+  """
+  Query Cache Module
+  동일/유사 쿼리의 결과를 캐싱하여 재계산을 방지한다.
+  """
+  import hashlib
+  import json
+  import time
+  from pathlib import Path
+  from typing import Optional
+  from dataclasses import dataclass
+
+  @dataclass
+  class CacheEntry:
+      question: str
+      hint: str
+      sql: str
+      confidence: float
+      timestamp: float
+      hit_count: int = 0
+
+  class QueryCache:
+      def __init__(self, cache_dir: Path = None, max_entries: int = 1000, ttl_seconds: float = 86400):
+          self.cache_dir = cache_dir or Path("./qasql_output/cache")
+          self.max_entries = max_entries
+          self.ttl_seconds = ttl_seconds
+          self._memory_cache: dict[str, CacheEntry] = {}
+          self._load_from_disk()
+
+      def _make_key(self, question: str, hint: str = "") -> str:
+          """질문+힌트의 정규화된 해시 키 생성"""
+          normalized = question.strip().lower() + "|" + (hint or "").strip().lower()
+          return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+      def get(self, question: str, hint: str = "") -> Optional[CacheEntry]:
+          """정확히 일치하는 캐시 엔트리 반환"""
+          key = self._make_key(question, hint)
+          entry = self._memory_cache.get(key)
+          if entry and (time.time() - entry.timestamp) < self.ttl_seconds:
+              entry.hit_count += 1
+              return entry
+          return None
+
+      def put(self, question: str, hint: str, sql: str, confidence: float):
+          """캐시에 저장"""
+          key = self._make_key(question, hint)
+          self._memory_cache[key] = CacheEntry(
+              question=question, hint=hint, sql=sql,
+              confidence=confidence, timestamp=time.time()
+          )
+          self._evict_if_needed()
+          self._save_to_disk()
+
+      def _evict_if_needed(self):
+          """LRU 방식으로 오래된 엔트리 제거"""
+          if len(self._memory_cache) > self.max_entries:
+              sorted_keys = sorted(
+                  self._memory_cache.keys(),
+                  key=lambda k: self._memory_cache[k].timestamp
+              )
+              for key in sorted_keys[:len(self._memory_cache) - self.max_entries]:
+                  del self._memory_cache[key]
+
+      def _save_to_disk(self):
+          """디스크에 캐시 저장"""
+          # ... JSON 직렬화 ...
+
+      def _load_from_disk(self):
+          """디스크에서 캐시 로드"""
+          # ... JSON 역직렬화 ...
+  ```
+- [x] **T-114-2** `QASQLEngine`에 캐시 통합
+  ```python
+  class QASQLEngine:
+      def __init__(self, ...):
+          # ...
+          self._query_cache: Optional[QueryCache] = None
+
+      def query(self, question, hint=None):
+          # 캐시 확인
+          if self._query_cache:
+              cached = self._query_cache.get(question, hint or "")
+              if cached:
+                  return QueryResult(
+                      sql=cached.sql, confidence=cached.confidence,
+                      question=question, hint=hint,
+                      reasoning="Retrieved from cache",
+                      metadata={"cache_hit": True}
+                  )
+
+          # ... 기존 파이프라인 ...
+
+          # 캐시 저장 (신뢰도 0.5 이상만)
+          if self._query_cache and judgment.confidence >= 0.5:
+              self._query_cache.put(question, hint or "", judgment.selected_sql, judgment.confidence)
+
+          return result
+  ```
+- [x] **T-114-3** `QASQLConfig`에 캐시 설정 추가
+  ```python
+  # config.py
+  enable_cache: bool = True
+  cache_ttl_seconds: float = 86400  # 24시간
+  cache_max_entries: int = 1000
+  ```
+- [x] **T-114-4** 캐시 무효화 API
+  ```python
+  class QASQLEngine:
+      def clear_cache(self):
+          """캐시 전체 삭제"""
+          if self._query_cache:
+              self._query_cache.clear()
+
+      def invalidate_cache(self, question: str, hint: str = ""):
+          """특정 쿼리 캐시 삭제"""
+          if self._query_cache:
+              self._query_cache.remove(question, hint)
+  ```
+
+**검증**:
+- 동일 질문 2회 연속 호출 → 2회차 `metadata.cache_hit=True`, 응답 시간 10x 이상 단축
+- 캐시 TTL 만료 후 → 재계산 발생 확인
+- `engine.clear_cache()` 후 → 캐시 미스 확인
+- 다른 hint로 동일 질문 → 별도 캐시 엔트리 확인
+
+---
+
+### PHASE 11 검증 체크포인트
+
+> 아래 항목을 모두 통과해야 PHASE 12로 진행할 수 있다.
+
+- [ ] **CHK-11-1** Few-shot 예시가 쿼리 유형에 따라 동적 선택되어 프롬프트에 포함
+- [ ] **CHK-11-2** CoT 전략이 step-by-step 추론 후 SQL 생성, 추출 정상 동작
+- [ ] **CHK-11-3** 후보 수가 hint 없이 5개(기존 4 + CoT), hint 있을 때 6개(기존 5 + CoT)
+- [ ] **CHK-11-4** FK가 있는 스키마에서 SchemaGraph가 브릿지 테이블을 자동 포함
+- [ ] **CHK-11-5** FK가 없는 스키마에서 SchemaGraph 스킵 → 기존 동작 유지
+- [ ] **CHK-11-6** PostgreSQL에서 병렬 실행 → 순차 대비 2x 이상 속도 향상
+- [ ] **CHK-11-7** 동일 쿼리 반복 시 캐시 히트 확인, 캐시 무효화 후 캐시 미스 확인
+- [ ] **CHK-11-8** 모든 변경 통합 후 기존 E2E 쿼리 정상 동작 (회귀)
+
+---
+
+## PHASE 12 — QA-SQL 엔진 고도화 (Phase C: 장기 연구)
+
+> 목적: Embedding 기반 의미적 매칭, 쿼리 분해, 피드백 루프 등 연구 수준 개선을 구현한다.
+> Phase B(PHASE 11) 완료 후 진행한다.
+> **원칙**: 각 기능은 feature flag로 제어 가능하게 만들어, 단계적 롤아웃이 가능하도록 한다.
+
+**필요 스킬**: Python, Embedding 모델 (sentence-transformers), 벤치마크 데이터셋, 비동기 프로그래밍, 데이터 파이프라인 설계
+
+---
+
+### T-120 Embedding 기반 의미적 스키마 매칭
+
+> 참조: `future_study.md` §2.1.2, §2.1.3
+> 대상 파일: 신규 `qasql/core/semantic_matcher.py`, `qasql/core/schema_agent.py`
+
+- [ ] **T-120-1** `qasql/core/semantic_matcher.py` 신규 파일 생성
+  ```python
+  """
+  Semantic Matcher Module
+  Embedding 기반 의미적 유사도로 스키마 매칭 정확도를 높인다.
+  """
+  class SemanticMatcher:
+      def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+          # sentence-transformers 로드 (optional dependency)
+          ...
+
+      def encode_schema(self, schema: dict, profile: dict) -> dict:
+          """스키마의 모든 테이블/컬럼을 벡터화하여 캐싱"""
+          # 테이블명 + 컬럼명 + 설명을 자연어 문장으로 변환 후 인코딩
+          ...
+
+      def score_tables(self, query: str, schema_embeddings: dict) -> dict[str, float]:
+          """쿼리와 각 테이블의 의미적 유사도 점수 반환"""
+          ...
+  ```
+- [ ] **T-120-2** `setup()` 단계에서 스키마 임베딩 사전 계산 및 캐싱
+  - `qasql_output/embeddings/{db_name}_embeddings.npy` 저장
+  - 스키마 변경 시만 재계산 (해시 비교)
+- [ ] **T-120-3** `SchemaAgent._score_table()` 수정 — 키워드 + LLM + Embedding 3중 점수 병합
+  ```python
+  final_score = max(keyword_score, llm_score, embedding_score)
+  # 또는 가중 평균:
+  # final_score = 0.3 * keyword_score + 0.3 * llm_score + 0.4 * embedding_score
+  ```
+- [ ] **T-120-4** `sentence-transformers` optional dependency 처리
+  - `try/except ImportError`로 미설치 시 기존 키워드+LLM 방식 폴백
+  - `pyproject.toml`에 `[project.optional-dependencies]` 추가: `semantic = ["sentence-transformers>=2.0"]`
+- [ ] **T-120-5** 동의어 확장 딕셔너리 (`synonyms.json`) 추가
+  ```json
+  {
+    "sales": ["revenue", "income", "매출", "수익"],
+    "customer": ["client", "buyer", "고객", "거래처"],
+    "order": ["purchase", "transaction", "주문", "거래"],
+    "product": ["item", "goods", "상품", "제품"],
+    "quantity": ["qty", "amount", "수량"]
+  }
+  ```
+- [ ] **T-120-6** 키워드 매칭 시 동의어 확장 적용
+  - `schema_agent.py:_keyword_match_score()` 에서 component words를 동의어로 확장 후 매칭
+
+**검증**:
+- "매출 합계" 쿼리 → "sales" 컬럼 포함 테이블 관련도 높음 확인
+- sentence-transformers 미설치 환경 → 에러 없이 기존 방식 동작 확인
+- 동의어 "qty" → "quantity" 컬럼 매칭 확인
+
+---
+
+### T-121 복합 쿼리 분해 (Query Decomposition)
+
+> 참조: `future_study.md` §2.5.3
+> 대상 파일: 신규 `qasql/core/decomposer.py`, `qasql/engine.py`
+
+- [ ] **T-121-1** `qasql/core/decomposer.py` 신규 파일 생성
+  ```python
+  """
+  Query Decomposer Module
+  복합 질문을 하위 질문으로 분해하고 SQL을 합성한다.
+  """
+  class QueryDecomposer:
+      def __init__(self, llm_client):
+          self.llm_client = llm_client
+
+      def should_decompose(self, nl_query: str) -> bool:
+          """질문이 분해가 필요한 복합 질문인지 판단"""
+          ...
+
+      def decompose(self, nl_query: str) -> list[dict]:
+          """질문을 하위 질문 리스트로 분해"""
+          # 반환: [{"sub_question": "...", "depends_on": [0, 1], "type": "subquery|cte"}]
+          ...
+
+      def compose_sql(self, sub_results: list[dict]) -> str:
+          """하위 SQL들을 합성하여 최종 SQL 생성"""
+          ...
+  ```
+- [ ] **T-121-2** `should_decompose()` 구현 — LLM으로 복잡도 판단
+  ```python
+  def should_decompose(self, nl_query: str) -> bool:
+      prompt = f"""Is this question a complex query that requires multiple steps or subqueries?
+
+  Question: "{nl_query}"
+
+  Answer YES only if the question requires:
+  - Nested subqueries
+  - Multiple aggregation levels
+  - Comparing aggregated values
+  - Finding top/bottom within a filtered subset
+
+  Answer ONLY "YES" or "NO"."""
+
+      response = self.llm_client.complete(prompt=prompt, max_tokens=10)
+      return "YES" in response.upper()
+  ```
+- [ ] **T-121-3** `decompose()` 구현 — LLM으로 하위 질문 분해
+  ```python
+  def decompose(self, nl_query: str) -> list[dict]:
+      prompt = f"""Break this complex question into simpler sub-questions that can each be answered with a simple SQL query.
+
+  Question: "{nl_query}"
+
+  Return JSON array of sub-questions in execution order:
+  [
+    {{"id": 1, "sub_question": "...", "depends_on": []}},
+    {{"id": 2, "sub_question": "...", "depends_on": [1]}}
+  ]"""
+
+      response = self.llm_client.complete(prompt=prompt, max_tokens=1024)
+      return self._parse_json(response)
+  ```
+- [ ] **T-121-4** `compose_sql()` 구현 — CTE 또는 서브쿼리 패턴으로 합성
+  ```python
+  def compose_sql(self, sub_results: list[dict], schema_str: str) -> str:
+      prompt = f"""Combine these sub-query results into a single SQL query using CTEs or subqueries.
+
+  Schema:
+  {schema_str}
+
+  Sub-queries:
+  {json.dumps(sub_results, indent=2)}
+
+  Write a single combined SQL query. Return ONLY the SQL."""
+
+      response = self.llm_client.complete(prompt=prompt, max_tokens=2048)
+      return self._extract_sql(response)
+  ```
+- [ ] **T-121-5** `QASQLEngine.query()` 수정 — 분해 파이프라인 통합
+  ```python
+  def query(self, question, hint=None):
+      # Stage 0: 복합 쿼리 분해 판단
+      decomposer = QueryDecomposer(self.llm_client)
+      if decomposer.should_decompose(question):
+          return self._query_decomposed(question, hint, decomposer)
+      else:
+          return self._query_standard(question, hint)  # 기존 파이프라인
+  ```
+- [ ] **T-121-6** `_query_decomposed()` 구현
+  - 각 하위 질문에 대해 기존 `_query_standard()` 호출
+  - 하위 SQL 결과를 수집하여 `compose_sql()`로 합성
+  - 합성된 SQL 실행 및 검증
+
+**검증**:
+- "지난 달 매출이 가장 높은 지역의 고객 수" → 분해 판단 YES 확인
+- 하위 질문 2-3개로 분해 확인
+- 합성된 SQL이 실행 가능하고 올바른 결과 반환 확인
+- 단순 질문("Show all customers") → 분해 판단 NO, 기존 파이프라인 사용 확인
+
+---
+
+### T-122 사용자 피드백 학습 루프
+
+> 참조: `future_study.md` §2.5.2
+> 대상 파일: 신규 `qasql/core/feedback.py`, `qasql/engine.py`
+
+- [ ] **T-122-1** `qasql/core/feedback.py` 신규 파일 생성
+  ```python
+  """
+  Feedback Store Module
+  사용자 피드백(질문-SQL 쌍)을 저장하고 few-shot 예시로 활용한다.
+  """
+  class FeedbackStore:
+      def __init__(self, store_path: Path = None):
+          self.store_path = store_path or Path("./qasql_output/feedback")
+          self.entries: list[dict] = []
+          self._load()
+
+      def add_feedback(self, question: str, original_sql: str, corrected_sql: str, hint: str = ""):
+          """사용자가 수정한 SQL을 피드백으로 저장"""
+          ...
+
+      def get_relevant_feedback(self, question: str, max_entries: int = 3) -> list[dict]:
+          """질문과 관련된 피드백을 few-shot 예시로 반환"""
+          # 단순: 키워드 매칭
+          # 고급: embedding 유사도 (T-120 의존)
+          ...
+
+      def _load(self):
+          """디스크에서 피드백 로드"""
+          ...
+
+      def _save(self):
+          """디스크에 피드백 저장"""
+          ...
+  ```
+- [ ] **T-122-2** `QASQLEngine.submit_feedback()` 공개 메서드 추가
+  ```python
+  def submit_feedback(self, question: str, original_sql: str, corrected_sql: str, hint: str = ""):
+      """사용자 피드백 제출. 향후 쿼리 시 few-shot 예시로 활용됨."""
+      if self._feedback_store:
+          self._feedback_store.add_feedback(question, original_sql, corrected_sql, hint)
+  ```
+- [ ] **T-122-3** `CandidateGenerator`에 피드백 기반 few-shot 주입
+  - 쿼리 생성 시 관련 피드백을 few-shot 예시로 프롬프트에 삽입
+  - 기존 `T-110`의 few-shot 라이브러리 + 사용자 피드백 통합
+- [ ] **T-122-4** 피드백 가중치: 최근 피드백 > 오래된 피드백
+  - 시간 기반 감쇠 (최근 7일 피드백 우선)
+- [ ] **T-122-5** TUI에 피드백 루프 UI 통합
+  - SQL 실행 후 "Was this correct? [Y/n/edit]" 프롬프트
+  - "edit" 선택 시 SQL 수정 → 자동 `submit_feedback()` 호출
+
+**검증**:
+- `submit_feedback("총 매출", "SELECT *...", "SELECT SUM(amount)...")` 저장 확인
+- 이후 "매출 합계" 쿼리 시 피드백이 few-shot 예시로 삽입 확인
+- 피드백 디스크 저장/로드 왕복 확인
+
+---
+
+### T-123 벤치마크 평가 프레임워크
+
+> 참조: `future_study.md` §2.5.4
+> 대상 파일: 신규 `qasql/benchmark/`, `tests/`
+
+- [ ] **T-123-1** `qasql/benchmark/__init__.py` 디렉토리 구조 생성
+  ```
+  qasql/benchmark/
+  ├── __init__.py
+  ├── runner.py         ← 벤치마크 실행기
+  ├── metrics.py        ← 평가 지표 계산
+  ├── datasets/         ← 벤치마크 데이터셋 (JSON)
+  │   ├── mini_spider.json     ← Spider 서브셋 (50문항)
+  │   └── custom.json          ← 커스텀 테스트셋
+  └── report.py         ← 결과 리포트 생성
+  ```
+- [ ] **T-123-2** `qasql/benchmark/metrics.py` 작성
+  ```python
+  class SQLMetrics:
+      @staticmethod
+      def execution_accuracy(predicted_rows, gold_rows) -> bool:
+          """실행 결과 일치 여부 (순서 무시, 부동소수점 허용)"""
+          ...
+
+      @staticmethod
+      def exact_match(predicted_sql: str, gold_sql: str) -> bool:
+          """SQL 문자열 정규화 후 일치 비교"""
+          ...
+
+      @staticmethod
+      def partial_match(predicted_sql: str, gold_sql: str) -> dict:
+          """부분 일치 (SELECT절, FROM절, WHERE절, GROUP BY절 각각 비교)"""
+          ...
+  ```
+- [ ] **T-123-3** `qasql/benchmark/runner.py` 작성
+  ```python
+  class BenchmarkRunner:
+      def __init__(self, engine: QASQLEngine, dataset_path: str):
+          ...
+
+      def run(self, max_questions: int = None) -> dict:
+          """벤치마크 실행. 각 질문에 대해 SQL 생성 + 실행 + 비교"""
+          results = {
+              "total": 0,
+              "execution_accuracy": 0,
+              "exact_match": 0,
+              "avg_confidence": 0.0,
+              "avg_latency_ms": 0.0,
+              "errors": [],
+              "details": [],
+          }
+          for item in self.dataset[:max_questions]:
+              # engine.query() 호출, gold와 비교
+              ...
+          return results
+
+      def run_comparison(self, engine_a, engine_b) -> dict:
+          """두 엔진 설정 간 A/B 비교"""
+          ...
+  ```
+- [ ] **T-123-4** Mini Spider 데이터셋 생성 (50문항)
+  - `qasql/benchmark/datasets/mini_spider.json` 작성
+  - 복잡도별 분포: easy(20), medium(15), hard(10), extra_hard(5)
+  - 각 항목: `{"question": "...", "gold_sql": "...", "db_id": "...", "difficulty": "..."}`
+- [ ] **T-123-5** `qasql/benchmark/report.py` — 결과 리포트 생성
+  ```python
+  class BenchmarkReport:
+      def generate(self, results: dict) -> str:
+          """마크다운 형식 벤치마크 리포트 생성"""
+          ...
+      def compare(self, results_a: dict, results_b: dict) -> str:
+          """A/B 비교 리포트"""
+          ...
+  ```
+- [ ] **T-123-6** CLI 명령어 추가: `qasql benchmark`
+  ```python
+  # cli.py에 benchmark 서브커맨드 추가
+  benchmark_p = subparsers.add_parser("benchmark", help="Run benchmark")
+  benchmark_p.add_argument("--dataset", required=True, help="Path to benchmark dataset JSON")
+  benchmark_p.add_argument("--max", type=int, help="Max questions to evaluate")
+  benchmark_p.add_argument("--report", "-r", help="Save report to file")
+  ```
+
+**검증**:
+- `qasql benchmark --dataset mini_spider.json --max 10` 실행 → 결과 요약 출력
+- execution_accuracy 지표가 0.0~1.0 범위 내 반환 확인
+- 리포트 생성 → 마크다운 파일 정상 출력 확인
+
+---
+
+### T-124 Self-Consistency 앙상블 및 다중 Judge
+
+> 참조: `future_study.md` §2.4.2, §2.4.3
+> 대상 파일: `qasql/core/judge.py`
+
+- [ ] **T-124-1** `SQLJudge`에 `_cross_validate()` 메서드 추가
+  ```python
+  def _cross_validate(self, execution_results: list[ExecutionResult]) -> dict[int, float]:
+      """결과 간 교차 검증으로 후보별 합의도 점수 반환"""
+      result_groups = {}
+      for r in execution_results:
+          if r.success and r.rows is not None:
+              # 결과 구조 해시: (행 수, 컬럼 수, 정렬된 컬럼명)
+              structure = (len(r.rows), len(r.columns or []), tuple(sorted(r.columns or [])))
+              result_groups.setdefault(structure, []).append(r.candidate_id)
+
+      # 합의도 점수: 같은 구조의 결과를 반환한 후보 수 / 전체 성공 후보 수
+      total_successful = sum(len(ids) for ids in result_groups.values())
+      consensus_scores = {}
+      for structure, candidate_ids in result_groups.items():
+          score = len(candidate_ids) / total_successful if total_successful > 0 else 0
+          for cid in candidate_ids:
+              consensus_scores[cid] = score
+
+      return consensus_scores
+  ```
+- [ ] **T-124-2** `judge()` 메서드에서 교차 검증 결과를 LLM Judge 프롬프트에 포함
+  ```python
+  # 합의도 높은 후보에 보너스 표시
+  consensus = self._cross_validate(execution_results)
+  for candidate, exec_result in successful:
+      consensus_score = consensus.get(candidate.candidate_id, 0)
+      text += f"Consensus: {consensus_score:.0%} of candidates agree with this result structure\n"
+  ```
+- [ ] **T-124-3** 신뢰도 보정 — Judge의 confidence에 합의도 반영
+  ```python
+  # LLM이 반환한 confidence에 합의도 보정 적용
+  adjusted_confidence = min(1.0, raw_confidence * (0.7 + 0.3 * consensus_score))
+  ```
+- [ ] **T-124-4** (선택) 다중 Judge 앙상블 — 3회 Judge 호출 후 다수결
+  ```python
+  def _ensemble_judge(self, successful, nl_query, hint, total_candidates, rounds=3):
+      votes = {}
+      for _ in range(rounds):
+          result = self._llm_judge(successful, nl_query, hint, total_candidates)
+          votes[result.selected_id] = votes.get(result.selected_id, 0) + 1
+      # 가장 많은 표를 받은 후보 선택
+      winner_id = max(votes, key=votes.get)
+      ...
+  ```
+  - 단, LLM 호출 3배 증가 → 성능 트레이드오프 고려하여 config flag로 제어
+
+**검증**:
+- 5개 후보 중 3개가 같은 구조(행 수+컬럼)의 결과 → 합의도 60% 확인
+- 합의도 높은 후보의 confidence가 보정되어 상향 확인
+- 앙상블 모드 활성화 시 3회 Judge 호출 확인
+
+---
+
+### T-125 Structured Output (Tool Use) 적용
+
+> 참조: `future_study.md` §2.6.3
+> 대상 파일: `qasql/llm.py`, `qasql/core/generator.py`, `qasql/core/judge.py`
+
+- [ ] **T-125-1** `AnthropicClient`에 `complete_with_tool()` 메서드 추가
+  ```python
+  def complete_with_tool(self, prompt, system_prompt, tool_schema, max_tokens=2048):
+      """Anthropic tool use를 이용한 구조화된 응답"""
+      response = self.client.messages.create(
+          model=self.model,
+          max_tokens=max_tokens,
+          system=system_prompt,
+          messages=[{"role": "user", "content": prompt}],
+          tools=[tool_schema],
+          tool_choice={"type": "tool", "name": tool_schema["name"]}
+      )
+      # tool use 블록에서 구조화된 결과 추출
+      for block in response.content:
+          if block.type == "tool_use":
+              return block.input
+      return None
+  ```
+- [ ] **T-125-2** `OpenAIClient`에 JSON mode 지원 추가
+  ```python
+  def complete_json(self, prompt, system_prompt, max_tokens=2048):
+      """OpenAI JSON mode를 이용한 구조화된 응답"""
+      response = self.client.chat.completions.create(
+          model=self.model,
+          messages=[...],
+          response_format={"type": "json_object"},
+          max_tokens=max_tokens,
+      )
+      return json.loads(response.choices[0].message.content)
+  ```
+- [ ] **T-125-3** `BaseLLMClient`에 `supports_structured_output` 프로퍼티 추가
+  ```python
+  class BaseLLMClient:
+      @property
+      def supports_structured_output(self) -> bool:
+          return False  # Ollama 기본값
+
+  class AnthropicClient(BaseLLMClient):
+      @property
+      def supports_structured_output(self) -> bool:
+          return True
+  ```
+- [ ] **T-125-4** `CandidateGenerator`에서 structured output 활용
+  - `supports_structured_output=True` 일 때 tool use/JSON mode로 SQL 추출
+  - 폴백: 기존 regex 추출
+- [ ] **T-125-5** `SQLJudge`에서 structured output 활용
+  - Judge의 JSON 응답을 tool use로 강제하여 파싱 실패 제거
+
+**검증**:
+- Anthropic API 사용 시 tool use로 SQL 추출 → 파싱 실패 0건 확인
+- OpenAI API 사용 시 JSON mode로 Judge 응답 → 파싱 실패 0건 확인
+- Ollama 사용 시 기존 regex 추출로 폴백 → 기존 동작 유지 확인
+
+---
+
+### PHASE 12 검증 체크포인트
+
+> 아래 항목을 모두 통과하면 엔진 고도화 완료.
+
+- [ ] **CHK-12-1** Embedding 매칭: "매출" 쿼리 → "sales" 컬럼 관련 테이블 식별 (동의어 + 임베딩)
+- [ ] **CHK-12-2** 복합 쿼리 분해: 2-step 질문 → 하위 질문 분해 → 합성 SQL 실행 성공
+- [ ] **CHK-12-3** 피드백 루프: 수정된 SQL 저장 → 이후 유사 질문에서 활용 확인
+- [ ] **CHK-12-4** 벤치마크: mini_spider 50문항 실행 → execution_accuracy 수치 출력
+- [ ] **CHK-12-5** Self-Consistency: 합의도 점수 계산 및 confidence 보정 동작
+- [ ] **CHK-12-6** Structured Output: Anthropic/OpenAI → 파싱 실패 0건, Ollama → 폴백 정상
+- [ ] **CHK-12-7** 전체 통합 벤치마크: Phase A+B+C 적용 전/후 execution_accuracy 비교 → 20% 이상 향상
+- [ ] **CHK-12-8** 모든 feature flag off 시 기존 v1.0.4 동작과 동일한 결과
+
+---
+
+## 엔진 개선 태스크 의존성 요약
+
+```
+PHASE 10 (즉시 적용 — Phase A)
+├── T-100 DB 방언 인식 프롬프트
+├── T-101 샘플 데이터 프롬프트 포함
+├── T-102 전략별 Temperature 차등
+├── T-103 누적 에러 히스토리 리파인
+└── T-104 Judge 실행 결과 기반 판단
+      ↓ (CHK-10 통과 필수)
+PHASE 11 (중기 개선 — Phase B)
+├── T-110 Few-Shot 예시 라이브러리
+├── T-111 Chain-of-Thought 프롬프트
+├── T-112 스키마 그래프 JOIN 경로 탐색
+├── T-113 후보 병렬 실행
+└── T-114 쿼리 캐싱 시스템
+      ↓ (CHK-11 통과 필수)
+PHASE 12 (장기 연구 — Phase C)
+├── T-120 Embedding 의미적 스키마 매칭
+├── T-121 복합 쿼리 분해
+├── T-122 사용자 피드백 학습 루프     ← T-110 의존
+├── T-123 벤치마크 평가 프레임워크
+├── T-124 Self-Consistency 앙상블
+└── T-125 Structured Output (Tool Use)
+```
+
+**Phase 내 의존성**:
+- T-110 (Few-shot) → T-122 (피드백 루프) — 피드백이 few-shot으로 삽입되므로
+- T-112 (스키마 그래프) → T-120 (Embedding 매칭) — 그래프 기반 위에 Embedding 레이어 추가
+- T-123 (벤치마크) — 독립. Phase C 시작 시 가장 먼저 구축 권장 (측정 기반 개선)
+
+---
+
+## 엔진 개선 Phase별 필요 스킬 요약
+
+| Phase | 핵심 스킬 |
+|-------|----------|
+| **10 (A)** | Python, SQL 방언 지식, 프롬프트 엔지니어링 |
+| **11 (B)** | 그래프 알고리즘(BFS), ThreadPoolExecutor, 캐싱 설계, Few-shot 프롬프트 설계 |
+| **12 (C)** | sentence-transformers, Embedding 유사도, 벤치마크 데이터셋, tool use API, 비동기 패턴 |

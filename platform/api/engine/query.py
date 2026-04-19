@@ -122,6 +122,8 @@ class handler(BaseHTTPRequestHandler):
                     "sql": query_result.sql,
                     "confidence": query_result.confidence,
                     "reasoning": query_result.reasoning,
+                    "candidates_tried": query_result.total_candidates,
+                    "candidates_succeeded": query_result.successful_candidates,
                     "metadata": query_result.metadata,
                 }
 

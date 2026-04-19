@@ -108,9 +108,24 @@ class SchemaAgent:
             for rel in sorted_rels[:3]:
                 relevant_tables[rel.table_name] = schema[rel.table_name]
 
+        # T-112: Expand via schema graph — include bridge tables on FK paths
+        join_hints = []
+        try:
+            from qasql.core.schema_graph import SchemaGraph
+            graph = SchemaGraph(schema)
+            if graph.has_edges and len(relevant_tables) >= 2:
+                expanded = graph.expand_relevant_tables(list(relevant_tables.keys()))
+                for table_name in expanded:
+                    if table_name not in relevant_tables and table_name in schema:
+                        relevant_tables[table_name] = schema[table_name]
+                join_hints = graph.get_all_join_hints(list(relevant_tables.keys()))
+        except Exception:
+            pass  # Graph expansion is best-effort
+
         return {
             "tables": relevant_tables,
             "table_relevances": table_relevances,
+            "join_hints": join_hints,
             "metadata": {
                 "decomposed_components": components,
                 "total_tables_evaluated": len(table_names),
