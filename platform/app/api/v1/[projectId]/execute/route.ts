@@ -66,7 +66,7 @@ export async function POST(
   }
 
   // Python 엔진의 execute 엔드포인트 호출
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL}`;
   const engineUrl = `${baseUrl}/api/engine/query`;
   let engineResult: Record<string, unknown>;
   try {
