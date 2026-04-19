@@ -19,7 +19,7 @@ export function MaskText({ text, className }: MaskTextProps) {
       </span>
       <button
         onClick={() => setVisible(!visible)}
-        className="text-gray-400 hover:text-gray-600 transition-colors"
+        className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-400 transition-colors"
         title={visible ? "숨기기" : "보기"}
       >
         {visible ? <EyeOff size={14} /> : <Eye size={14} />}

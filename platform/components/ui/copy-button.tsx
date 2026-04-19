@@ -26,7 +26,7 @@ export function CopyButton({ text, className }: CopyButtonProps) {
     <button
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center justify-center p-1.5 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors",
+        "inline-flex items-center justify-center p-1.5 rounded text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors",
         className
       )}
       title="복사"

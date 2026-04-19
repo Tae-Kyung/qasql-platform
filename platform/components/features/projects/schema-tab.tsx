@@ -47,10 +47,10 @@ function SchemaProgress({ elapsed }: { elapsed: number }) {
   );
 
   return (
-    <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 space-y-3">
+    <div className="rounded-lg border border-blue-100 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-3">
       <div className="flex items-center gap-2">
         <svg
-          className="animate-spin h-4 w-4 text-blue-500 flex-shrink-0"
+          className="animate-spin h-4 w-4 text-blue-500 dark:text-blue-400 flex-shrink-0"
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
@@ -58,12 +58,12 @@ function SchemaProgress({ elapsed }: { elapsed: number }) {
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
         </svg>
-        <span className="text-sm font-medium text-blue-700">
+        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
           {STEPS[stepIndex].label}...
         </span>
-        <span className="ml-auto text-xs text-blue-500">{elapsed}초 경과</span>
+        <span className="ml-auto text-xs text-blue-500 dark:text-blue-400">{elapsed}초 경과</span>
       </div>
-      <div className="w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
+      <div className="w-full bg-blue-100 dark:bg-blue-900/40 rounded-full h-1.5 overflow-hidden">
         <div
           className="bg-blue-500 h-1.5 rounded-full transition-all duration-1000 ease-linear"
           style={{ width: `${totalProgress}%` }}
@@ -75,13 +75,13 @@ function SchemaProgress({ elapsed }: { elapsed: number }) {
           const isActive = i === stepIndex;
           return (
             <div key={step.label} className="flex items-center gap-2 text-xs">
-              <span className={isDone ? "text-green-500" : isActive ? "text-blue-600" : "text-gray-300"}>
+              <span className={isDone ? "text-green-500 dark:text-green-400" : isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-300 dark:text-slate-600"}>
                 {isDone ? "✓" : isActive ? "›" : "○"}
               </span>
-              <span className={isDone ? "text-green-600 line-through" : isActive ? "text-blue-700 font-medium" : "text-gray-400"}>
+              <span className={isDone ? "text-green-600 dark:text-green-400 line-through" : isActive ? "text-blue-700 dark:text-blue-300 font-medium" : "text-gray-400 dark:text-slate-500"}>
                 {step.label}
               </span>
-              {isActive && <span className="text-blue-400">{Math.round(stepProgress)}%</span>}
+              {isActive && <span className="text-blue-400 dark:text-blue-300">{Math.round(stepProgress)}%</span>}
             </div>
           );
         })}
@@ -302,7 +302,7 @@ export function SchemaTab({ projectId, initialStatus }: SchemaTabProps) {
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <div>
-          <p className="text-sm text-gray-500 mb-1">스키마 상태</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-1">스키마 상태</p>
           <StatusBadge status={status} />
         </div>
         <Button onClick={handleStart} loading={starting} disabled={status === "running"} className="self-end">
@@ -313,15 +313,15 @@ export function SchemaTab({ projectId, initialStatus }: SchemaTabProps) {
       {status === "running" && <SchemaProgress elapsed={elapsed} />}
 
       {status === "error" && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-700 font-medium">스키마 분석 실패</p>
-          <p className="text-xs text-red-500 mt-1">DB 연결 설정을 확인하고 다시 시도하세요.</p>
+        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4">
+          <p className="text-sm text-red-700 dark:text-red-400 font-medium">스키마 분석 실패</p>
+          <p className="text-xs text-red-500 dark:text-red-500 mt-1">DB 연결 설정을 확인하고 다시 시도하세요.</p>
         </div>
       )}
 
       {status === "done" && tables.length === 0 && (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <p className="text-sm text-gray-600">분석된 테이블이 없습니다.</p>
+        <div className="rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 p-4">
+          <p className="text-sm text-gray-600 dark:text-slate-400">분석된 테이블이 없습니다.</p>
         </div>
       )}
 
@@ -330,9 +330,9 @@ export function SchemaTab({ projectId, initialStatus }: SchemaTabProps) {
           {/* 테이블 선택 헤더 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h3 className="font-semibold text-gray-800">
+              <h3 className="font-semibold text-gray-800 dark:text-slate-200">
                 테이블 목록
-                <span className="ml-2 text-sm font-normal text-gray-500">
+                <span className="ml-2 text-sm font-normal text-gray-500 dark:text-slate-400">
                   ({selectedTables.size}/{tables.length}개 선택됨)
                 </span>
               </h3>
@@ -348,8 +348,8 @@ export function SchemaTab({ projectId, initialStatus }: SchemaTabProps) {
           </div>
 
           {/* 선택 안내 */}
-          <div className="rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
-            <p className="text-xs text-blue-700">
+          <div className="rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 px-3 py-2">
+            <p className="text-xs text-blue-700 dark:text-blue-400">
               선택된 테이블만 NL-to-SQL 생성 시 사용됩니다. 필요한 테이블만 선택하면 더 정확한 SQL을 생성할 수 있습니다.
             </p>
           </div>
@@ -360,15 +360,15 @@ export function SchemaTab({ projectId, initialStatus }: SchemaTabProps) {
               <div
                 key={table.table_name}
                 className={`border rounded-lg overflow-hidden transition-colors ${
-                  isSelected ? "border-blue-300" : "border-gray-200 opacity-60"
+                  isSelected ? "border-blue-300 dark:border-blue-700" : "border-gray-200 dark:border-slate-700 opacity-60 dark:opacity-70"
                 }`}
               >
                 {/* 테이블 헤더 — 클릭 시 선택/해제 */}
                 <div
                   className={`flex items-center gap-3 px-4 py-2.5 border-b cursor-pointer select-none transition-colors ${
                     isSelected
-                      ? "bg-blue-50 border-blue-200 hover:bg-blue-100"
-                      : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                      ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50"
+                      : "bg-gray-50 dark:bg-slate-700/50 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700"
                   }`}
                   onClick={() => toggleTable(table.table_name)}
                 >
@@ -379,12 +379,12 @@ export function SchemaTab({ projectId, initialStatus }: SchemaTabProps) {
                     onClick={(e) => e.stopPropagation()}
                     className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer"
                   />
-                  <p className="font-mono text-sm font-semibold text-gray-800 flex-1">
+                  <p className="font-mono text-sm font-semibold text-gray-800 dark:text-slate-200 flex-1">
                     {table.table_name}
                   </p>
-                  <span className="text-xs text-gray-400">{table.columns.length}개 컬럼</span>
+                  <span className="text-xs text-gray-400 dark:text-slate-500">{table.columns.length}개 컬럼</span>
                   {!isSelected && (
-                    <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded">제외됨</span>
+                    <span className="text-xs text-gray-400 dark:text-slate-500 bg-gray-200 dark:bg-slate-700 px-2 py-0.5 rounded">제외됨</span>
                   )}
                 </div>
 
@@ -392,24 +392,24 @@ export function SchemaTab({ projectId, initialStatus }: SchemaTabProps) {
                 {isSelected && (
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-2 px-4 font-medium text-gray-600">컬럼명</th>
-                        <th className="text-left py-2 px-4 font-medium text-gray-600">타입</th>
-                        <th className="text-left py-2 px-4 font-medium text-gray-600">Readable Name</th>
+                      <tr className="border-b border-gray-200 dark:border-slate-700">
+                        <th className="text-left py-2 px-4 font-medium text-gray-600 dark:text-slate-400">컬럼명</th>
+                        <th className="text-left py-2 px-4 font-medium text-gray-600 dark:text-slate-400">타입</th>
+                        <th className="text-left py-2 px-4 font-medium text-gray-600 dark:text-slate-400">Readable Name</th>
                       </tr>
                     </thead>
                     <tbody>
                       {table.columns.map((col) => (
-                        <tr key={col.column_name} className="border-b border-gray-100 last:border-0">
-                          <td className="py-2 px-4 font-mono text-gray-800">{col.column_name}</td>
-                          <td className="py-2 px-4 text-gray-500">{col.data_type}</td>
+                        <tr key={col.column_name} className="border-b border-gray-100 dark:border-slate-700 last:border-0">
+                          <td className="py-2 px-4 font-mono text-gray-800 dark:text-slate-200">{col.column_name}</td>
+                          <td className="py-2 px-4 text-gray-500 dark:text-slate-400">{col.data_type}</td>
                           <td className="py-2 px-4">
                             <input
                               type="text"
                               placeholder="가독성 있는 이름"
                               value={getReadable(table.table_name, col.column_name)}
                               onChange={(e) => handleReadableChange(table.table_name, col.column_name, e.target.value)}
-                              className="w-full text-sm text-gray-900 bg-white border border-gray-200 rounded px-2 py-1 placeholder:text-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                              className="w-full text-sm text-gray-900 dark:text-slate-100 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded px-2 py-1 placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
                             />
                           </td>
                         </tr>

@@ -109,32 +109,32 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
       {/* 상태 & 날짜 */}
       <div className="flex items-center gap-4">
         <div>
-          <p className="text-sm text-gray-500">상태</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">상태</p>
           <StatusBadge status={currentStatus} />
         </div>
         <div>
-          <p className="text-sm text-gray-500">생성일</p>
-          <p className="text-sm text-gray-700">{format(new Date(project.created_at), "yyyy-MM-dd HH:mm")}</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">생성일</p>
+          <p className="text-sm text-gray-700 dark:text-slate-300">{format(new Date(project.created_at), "yyyy-MM-dd HH:mm")}</p>
         </div>
       </div>
 
       {/* 설정 완료 체크리스트 */}
-      <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-        <p className="text-sm font-semibold text-gray-800">설정 진행 상황</p>
+      <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-4 space-y-3">
+        <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">설정 진행 상황</p>
         <div className="space-y-2">
           {checks.map((item) => (
             <div key={item.label} className="flex items-start gap-3">
               <span className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
-                item.done ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"
+                item.done ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400" : "bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-500"
               }`}>
                 {item.done ? "✓" : "○"}
               </span>
               <div>
-                <p className={`text-sm font-medium ${item.done ? "text-gray-700" : "text-gray-500"}`}>
+                <p className={`text-sm font-medium ${item.done ? "text-gray-700 dark:text-slate-300" : "text-gray-500 dark:text-slate-400"}`}>
                   {item.label}
                 </p>
                 {!item.done && (
-                  <p className="text-xs text-gray-400 mt-0.5">{item.hint}</p>
+                  <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">{item.hint}</p>
                 )}
               </div>
             </div>
@@ -142,7 +142,7 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
         </div>
 
         {/* 활성화 버튼 */}
-        <div className="pt-2 border-t border-gray-100">
+        <div className="pt-2 border-t border-gray-100 dark:border-slate-700">
           {currentStatus === "active" ? (
             <div className="flex items-center gap-2 text-sm text-green-600">
               <span className="font-semibold">✓</span>
@@ -150,7 +150,7 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 dark:text-slate-400">
                 {allDone ? "모든 설정이 완료되었습니다." : `${checks.filter(c => !c.done).length}개 항목 미완료`}
               </p>
               <Button
@@ -175,10 +175,10 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
         />
 
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700">설명</label>
+          <label className="text-sm font-medium text-gray-700 dark:text-slate-300">설명</label>
           <textarea
             rows={4}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none placeholder:text-gray-400"
+            className="w-full rounded-md border border-gray-300 dark:border-slate-600 px-3 py-2 text-sm text-gray-900 dark:text-slate-100 bg-white dark:bg-slate-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none placeholder:text-gray-400 dark:placeholder:text-slate-500"
             {...register("description")}
           />
           {errors.description && (

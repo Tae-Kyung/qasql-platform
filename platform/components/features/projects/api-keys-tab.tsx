@@ -98,41 +98,41 @@ export function ApiKeysTab({ projectId }: ApiKeysTabProps) {
       </div>
 
       {loading ? (
-        <p className="text-sm text-gray-500">불러오는 중...</p>
+        <p className="text-sm text-gray-500 dark:text-slate-400">불러오는 중...</p>
       ) : keys.length === 0 ? (
-        <p className="text-sm text-gray-500">발급된 API Key가 없습니다.</p>
+        <p className="text-sm text-gray-500 dark:text-slate-400">발급된 API Key가 없습니다.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-2 pr-4 font-medium text-gray-600">Prefix</th>
-                <th className="text-left py-2 pr-4 font-medium text-gray-600">상태</th>
-                <th className="text-left py-2 pr-4 font-medium text-gray-600">만료일</th>
-                <th className="text-left py-2 pr-4 font-medium text-gray-600">IP 화이트리스트</th>
-                <th className="text-left py-2 font-medium text-gray-600">작업</th>
+              <tr className="border-b border-gray-200 dark:border-slate-700">
+                <th className="text-left py-2 pr-4 font-medium text-gray-600 dark:text-slate-400">Prefix</th>
+                <th className="text-left py-2 pr-4 font-medium text-gray-600 dark:text-slate-400">상태</th>
+                <th className="text-left py-2 pr-4 font-medium text-gray-600 dark:text-slate-400">만료일</th>
+                <th className="text-left py-2 pr-4 font-medium text-gray-600 dark:text-slate-400">IP 화이트리스트</th>
+                <th className="text-left py-2 font-medium text-gray-600 dark:text-slate-400">작업</th>
               </tr>
             </thead>
             <tbody>
               {keys.map((key) => (
-                <tr key={key.id} className="border-b border-gray-100 last:border-0">
-                  <td className="py-2 pr-4 font-mono text-gray-800">{key.key_prefix}...</td>
+                <tr key={key.id} className="border-b border-gray-100 dark:border-slate-700 last:border-0">
+                  <td className="py-2 pr-4 font-mono text-gray-800 dark:text-slate-200">{key.key_prefix}...</td>
                   <td className="py-2 pr-4">
                     <button
                       onClick={() => handleToggle(key.id, key.is_active)}
                       className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${
                         key.is_active
-                          ? "bg-green-100 text-green-700 hover:bg-green-200"
-                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                          ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50"
+                          : "bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-600"
                       }`}
                     >
                       {key.is_active ? "활성" : "비활성"}
                     </button>
                   </td>
-                  <td className="py-2 pr-4 text-gray-600">
+                  <td className="py-2 pr-4 text-gray-600 dark:text-slate-400">
                     {key.expires_at ? format(new Date(key.expires_at), "yyyy-MM-dd") : "무기한"}
                   </td>
-                  <td className="py-2 pr-4 text-gray-600">
+                  <td className="py-2 pr-4 text-gray-600 dark:text-slate-400">
                     {key.ip_whitelist && key.ip_whitelist.length > 0
                       ? key.ip_whitelist.join(", ")
                       : "제한 없음"}
@@ -162,12 +162,12 @@ export function ApiKeysTab({ projectId }: ApiKeysTabProps) {
         title="새 API Key 발급됨"
       >
         <div className="space-y-4">
-          <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800">
+          <div className="rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 p-3 text-sm text-yellow-800 dark:text-yellow-300">
             이 키는 지금만 표시됩니다. 안전한 곳에 보관하세요.
           </div>
 
-          <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-md p-3">
-            <code className="font-mono text-sm text-gray-800 flex-1 break-all">
+          <div className="flex items-center gap-2 bg-gray-50 dark:bg-slate-700/50 border border-gray-200 dark:border-slate-600 rounded-md p-3">
+            <code className="font-mono text-sm text-gray-800 dark:text-slate-200 flex-1 break-all">
               {newRawKey}
             </code>
             {newRawKey && <CopyButton text={newRawKey} />}

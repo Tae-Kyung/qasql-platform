@@ -113,23 +113,23 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
     <div className="max-w-5xl mx-auto space-y-6">
       {/* 헤더 */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Playground</h1>
-        <p className="mt-1 text-sm text-gray-500">{projectName} — 자연어로 데이터를 조회해보세요</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Playground</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">{projectName} — 자연어로 데이터를 조회해보세요</p>
       </div>
 
       {/* 스키마 미완료 경고 */}
       {!isSchemaReady && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-          <p className="text-sm text-amber-700 font-medium">스키마 분석이 필요합니다</p>
-          <p className="text-xs text-amber-600 mt-1">스키마 탭에서 분석을 먼저 완료해야 정확한 SQL을 생성할 수 있습니다.</p>
+        <div className="rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+          <p className="text-sm text-amber-700 dark:text-amber-300 font-medium">스키마 분석이 필요합니다</p>
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">스키마 탭에서 분석을 먼저 완료해야 정확한 SQL을 생성할 수 있습니다.</p>
         </div>
       )}
 
       {/* Supabase SQL 실행 안내 */}
       {isSupabase && (
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-          <p className="text-sm text-blue-700 font-medium">Supabase — SQL 복사 후 실행</p>
-          <p className="text-xs text-blue-600 mt-1">생성된 SQL을 복사하여 Supabase 대시보드의 <strong>SQL Editor</strong>에서 실행하세요.</p>
+        <div className="rounded-lg border border-blue-100 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
+          <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">Supabase — SQL 복사 후 실행</p>
+          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">생성된 SQL을 복사하여 Supabase 대시보드의 <strong>SQL Editor</strong>에서 실행하세요.</p>
         </div>
       )}
 
@@ -137,13 +137,13 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
       <Card title="질문 입력">
         <div className="space-y-4">
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">자연어 질문</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">자연어 질문</label>
             <textarea
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               placeholder="예: 지난 달 가장 많이 구매한 상품 10개를 알려줘"
               rows={3}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white outline-none transition-colors placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              className="w-full rounded-md border border-gray-300 dark:border-slate-600 px-3 py-2 text-sm text-gray-900 dark:text-slate-100 bg-white dark:bg-slate-700 outline-none transition-colors placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
             />
           </div>
 
@@ -173,7 +173,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
             {/* 신뢰도 */}
             {confidence !== null && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500">신뢰도:</span>
+                <span className="text-sm text-gray-500 dark:text-slate-400">신뢰도:</span>
                 <span
                   className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-semibold ${getConfidenceColor(confidence)}`}
                 >
@@ -184,18 +184,18 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
 
             {/* Reasoning */}
             {reasoning && (
-              <div className="rounded-md border border-gray-200 bg-gray-50">
+              <div className="rounded-md border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/50">
                 <button
                   type="button"
                   onClick={() => setReasoningExpanded((prev) => !prev)}
-                  className="flex items-center justify-between w-full px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors rounded-md"
+                  className="flex items-center justify-between w-full px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors rounded-md"
                 >
                   <span>추론 과정</span>
-                  <span className="text-gray-400">{reasoningExpanded ? "▲" : "▼"}</span>
+                  <span className="text-gray-400 dark:text-slate-500">{reasoningExpanded ? "▲" : "▼"}</span>
                 </button>
                 {reasoningExpanded && (
                   <div className="px-4 pb-4">
-                    <p className="text-sm text-gray-600 whitespace-pre-wrap">{reasoning}</p>
+                    <p className="text-sm text-gray-600 dark:text-slate-400 whitespace-pre-wrap">{reasoning}</p>
                   </div>
                 )}
               </div>
@@ -204,11 +204,11 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
             {/* SQL 편집 영역 */}
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-700">SQL (편집 가능)</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-slate-300">SQL (편집 가능)</label>
                 <button
                   type="button"
                   onClick={() => { navigator.clipboard.writeText(editedSql); }}
-                  className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded border border-blue-200 hover:bg-blue-50 transition-colors"
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 px-2 py-1 rounded border border-blue-200 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                 >
                   복사
                 </button>
@@ -217,7 +217,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
                 value={editedSql}
                 onChange={(e) => setEditedSql(e.target.value)}
                 rows={8}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white font-mono outline-none transition-colors focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
+                className="w-full rounded-md border border-gray-300 dark:border-slate-600 px-3 py-2 text-sm text-gray-900 dark:text-slate-100 bg-white dark:bg-slate-900 font-mono outline-none transition-colors focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
               />
             </div>
 
@@ -237,8 +237,8 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
 
       {/* 에러 표시 */}
       {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm text-red-700">{error}</p>
+        <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3">
+          <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
         </div>
       )}
 
@@ -246,32 +246,32 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
       {result && (
         <Card title={`실행 결과 (${result.row_count}행)`}>
           {result.columns.length === 0 ? (
-            <p className="text-sm text-gray-500">반환된 데이터가 없습니다</p>
+            <p className="text-sm text-gray-500 dark:text-slate-400">반환된 데이터가 없습니다</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-slate-700 text-sm">
+                <thead className="bg-gray-50 dark:bg-slate-700/50">
                   <tr>
                     {result.columns.map((col) => (
                       <th
                         key={col}
-                        className="px-4 py-2 text-left font-medium text-gray-700 whitespace-nowrap"
+                        className="px-4 py-2 text-left font-medium text-gray-700 dark:text-slate-300 whitespace-nowrap"
                       >
                         {col}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                   {result.rows.map((row, rowIdx) => (
-                    <tr key={rowIdx} className="hover:bg-gray-50">
+                    <tr key={rowIdx} className="hover:bg-gray-50 dark:hover:bg-slate-700/30">
                       {result.columns.map((col) => (
                         <td
                           key={col}
-                          className="px-4 py-2 text-gray-700 whitespace-nowrap max-w-xs truncate"
+                          className="px-4 py-2 text-gray-700 dark:text-slate-300 whitespace-nowrap max-w-xs truncate"
                         >
                           {row[col] === null || row[col] === undefined
-                            ? <span className="text-gray-400 italic">null</span>
+                            ? <span className="text-gray-400 dark:text-slate-500 italic">null</span>
                             : String(row[col])}
                         </td>
                       ))}

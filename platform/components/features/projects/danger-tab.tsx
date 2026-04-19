@@ -42,9 +42,9 @@ export function DangerTab({ projectId, projectName }: DangerTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-red-200 bg-red-50 p-6">
-        <h3 className="font-semibold text-red-800 mb-2">프로젝트 삭제</h3>
-        <p className="text-sm text-red-700 mb-4">
+      <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-6">
+        <h3 className="font-semibold text-red-800 dark:text-red-400 mb-2">프로젝트 삭제</h3>
+        <p className="text-sm text-red-700 dark:text-red-300 mb-4">
           이 작업은 되돌릴 수 없습니다. 프로젝트와 관련된 모든 데이터가 영구적으로 삭제됩니다.
         </p>
         <Button
@@ -64,9 +64,9 @@ export function DangerTab({ projectId, projectName }: DangerTabProps) {
         title="프로젝트 삭제 확인"
       >
         <div className="space-y-4">
-          <p className="text-sm text-gray-700">
+          <p className="text-sm text-gray-700 dark:text-slate-300">
             삭제하려면 프로젝트 이름{" "}
-            <strong className="text-gray-900">{projectName}</strong>을 입력하세요.
+            <strong className="text-gray-900 dark:text-slate-100">{projectName}</strong>을 입력하세요.
           </p>
 
           <Input
