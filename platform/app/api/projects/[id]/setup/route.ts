@@ -86,7 +86,8 @@ export const POST = withAuth(async (_req, ctx, user: User) => {
   }
 
   // PostgreSQL/MySQL/SQLite: Python 엔진으로 위임
-  const engineUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/engine/setup`;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`;
+  const engineUrl = `${baseUrl}/api/engine/setup`;
   fetch(engineUrl, {
     method: "POST",
     headers: {
