@@ -66,7 +66,7 @@ export async function POST(
   }
 
   // Python 엔진의 execute 엔드포인트 호출
-  const engineUrl = `${process.env.NEXT_PUBLIC_APP_URL}/internal/engine/query`;
+  const engineUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/engine/query`;
   let engineResult: Record<string, unknown>;
   try {
     const engineRes = await fetch(engineUrl, {

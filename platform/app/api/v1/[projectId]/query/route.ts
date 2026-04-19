@@ -75,7 +75,7 @@ export async function POST(
   }
 
   // 5. Python 엔진 호출
-  const engineUrl = `${process.env.NEXT_PUBLIC_APP_URL}/internal/engine/query`;
+  const engineUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/engine/query`;
   let engineResult: Record<string, unknown>;
   try {
     const engineRes = await fetch(engineUrl, {
