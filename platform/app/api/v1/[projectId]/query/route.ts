@@ -105,7 +105,9 @@ export async function POST(
       );
     }
 
-    engineResult = await engineRes.json();
+    const engineJson = await engineRes.json();
+    // Python engine wraps response in { success, data: { ... } }
+    engineResult = (engineJson.data ?? engineJson) as Record<string, unknown>;
   } catch (err) {
     const isTimeout = err instanceof Error && err.name === "TimeoutError";
     const code = isTimeout ? "QUERY_TIMEOUT" : "LLM_UNAVAILABLE";
