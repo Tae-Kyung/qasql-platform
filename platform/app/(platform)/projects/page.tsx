@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { format } from "date-fns";
 import { Project, ProjectStatus } from "@/types";
+import { getServerT } from "@/lib/i18n/server";
 
 export default async function ProjectsPage() {
-  const user = await getCurrentUserOrRedirect();
+  const [user, t] = await Promise.all([getCurrentUserOrRedirect(), getServerT()]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase: any = await createServiceClient();
 
@@ -18,7 +19,6 @@ export default async function ProjectsPage() {
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
-  // 각 프로젝트별 query_logs COUNT + config
   const enriched = await Promise.all(
     ((projects ?? []) as Project[]).map(async (p: Project) => {
       const { count } = await supabase
@@ -53,16 +53,16 @@ export default async function ProjectsPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">프로젝트</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">{t.projects.title}</h1>
         <Link href="/projects/new">
-          <Button>새 프로젝트</Button>
+          <Button>{t.projects.newProject}</Button>
         </Link>
       </div>
 
       {enriched.length === 0 ? (
         <Card>
-          <p className="text-sm text-gray-500 text-center py-8">
-            아직 프로젝트가 없습니다. 새 프로젝트를 생성해보세요.
+          <p className="text-sm text-gray-500 dark:text-slate-400 text-center py-8">
+            {t.projects.noProjects}
           </p>
         </Card>
       ) : (
@@ -71,32 +71,34 @@ export default async function ProjectsPage() {
             <Link key={project.id} href={`/projects/${project.id}`}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
                 <div className="flex items-start justify-between mb-3">
-                  <h2 className="font-semibold text-gray-900 truncate flex-1 mr-2">
+                  <h2 className="font-semibold text-gray-900 dark:text-slate-100 truncate flex-1 mr-2">
                     {project.name}
                   </h2>
                   <StatusBadge status={project.status as ProjectStatus} />
                 </div>
 
-                <div className="space-y-2 text-sm text-gray-500">
+                <div className="space-y-2 text-sm text-gray-500 dark:text-slate-400">
                   <div className="flex justify-between">
-                    <span>API 호출</span>
-                    <span className="font-medium text-gray-700">{project.api_call_count}건</span>
+                    <span>{t.projects.apiCalls}</span>
+                    <span className="font-medium text-gray-700 dark:text-slate-300">
+                      {project.api_call_count}{t.projects.callsUnit}
+                    </span>
                   </div>
                   <div className="flex justify-between">
-                    <span>마지막 쿼리</span>
-                    <span className="font-medium text-gray-700">
+                    <span>{t.projects.lastQueried}</span>
+                    <span className="font-medium text-gray-700 dark:text-slate-300">
                       {project.last_queried_at
                         ? format(new Date(project.last_queried_at), "MM/dd HH:mm")
                         : "-"}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span>DB</span>
-                    <span className="font-medium text-gray-700">{project.db_type ?? "-"}</span>
+                    <span>{t.projects.db}</span>
+                    <span className="font-medium text-gray-700 dark:text-slate-300">{project.db_type ?? "-"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>LLM</span>
-                    <span className="font-medium text-gray-700">{project.llm_provider ?? "-"}</span>
+                    <span>{t.projects.llm}</span>
+                    <span className="font-medium text-gray-700 dark:text-slate-300">{project.llm_provider ?? "-"}</span>
                   </div>
                 </div>
               </Card>

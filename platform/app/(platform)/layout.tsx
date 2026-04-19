@@ -22,11 +22,11 @@ export default async function PlatformLayout({
 
   return (
     <ToastProvider>
-      <div className="min-h-screen flex bg-gray-50">
+      <div className="min-h-screen flex bg-gray-50 dark:bg-slate-900">
         {/* 사이드바 */}
-        <aside className="w-60 shrink-0 bg-white border-r border-gray-200 flex flex-col fixed inset-y-0 left-0 z-30">
+        <aside className="w-60 shrink-0 bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 flex flex-col fixed inset-y-0 left-0 z-30">
           {/* 로고 */}
-          <div className="h-16 flex items-center px-6 border-b border-gray-200">
+          <div className="h-16 flex items-center px-6 border-b border-gray-200 dark:border-slate-700">
             <span className="text-xl font-bold text-blue-600">QA-SQL</span>
           </div>
           <SidebarNav />
@@ -35,11 +35,11 @@ export default async function PlatformLayout({
         {/* 메인 영역 */}
         <div className="flex-1 flex flex-col ml-60">
           {/* 헤더 */}
-          <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-6 gap-3 sticky top-0 z-20">
+          <header className="h-16 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex items-center justify-end px-6 gap-3 sticky top-0 z-20">
             <Badge variant={planBadgeVariant[plan] ?? "default"}>
               {plan.toUpperCase()}
             </Badge>
-            <span className="text-sm text-gray-600">{user.email}</span>
+            <span className="text-sm text-gray-600 dark:text-slate-400">{user.email}</span>
           </header>
 
           {/* 콘텐츠 */}

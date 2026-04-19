@@ -3,9 +3,10 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PasswordForm } from "@/components/features/settings/password-form";
 import { DeleteAccount } from "@/components/features/settings/delete-account";
+import { getServerT } from "@/lib/i18n/server";
 
 export default async function SettingsPage() {
-  const user = await getCurrentUserOrRedirect();
+  const [user, t] = await Promise.all([getCurrentUserOrRedirect(), getServerT()]);
   const plan = await getUserPlan(user.id);
 
   const planBadgeVariant: Record<string, "default" | "info" | "success"> = {
@@ -16,17 +17,16 @@ export default async function SettingsPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900">계정 설정</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">{t.settings.title}</h1>
 
-      {/* 계정 정보 */}
-      <Card title="계정 정보">
+      <Card title={t.settings.accountInfo}>
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500">이메일</span>
-            <span className="text-sm font-medium text-gray-800">{user.email}</span>
+            <span className="text-sm text-gray-500 dark:text-slate-400">{t.settings.email}</span>
+            <span className="text-sm font-medium text-gray-800 dark:text-slate-200">{user.email}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500">플랜</span>
+            <span className="text-sm text-gray-500 dark:text-slate-400">{t.settings.plan}</span>
             <Badge variant={planBadgeVariant[plan] ?? "default"}>
               {plan.toUpperCase()}
             </Badge>
@@ -34,10 +34,7 @@ export default async function SettingsPage() {
         </div>
       </Card>
 
-      {/* 비밀번호 변경 */}
       <PasswordForm />
-
-      {/* 계정 삭제 */}
       <DeleteAccount />
     </div>
   );

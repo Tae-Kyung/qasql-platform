@@ -39,16 +39,16 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
       {/* Modal content */}
       <div
         className={cn(
-          "relative z-10 bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4",
+          "relative z-10 bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-lg mx-4",
           className
         )}
       >
         {title && (
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">{title}</h2>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 transition-colors"
             >
               <X size={20} />
             </button>

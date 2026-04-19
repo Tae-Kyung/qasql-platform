@@ -28,16 +28,16 @@ export function useToast(): ToastContextValue {
 
 const toastStyles: Record<ToastType, { container: string; icon: ReactNode }> = {
   success: {
-    container: "bg-green-50 border-green-200 text-green-800",
-    icon: <CheckCircle size={18} className="text-green-600 shrink-0" />,
+    container: "bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-700 text-green-800 dark:text-green-300",
+    icon: <CheckCircle size={18} className="text-green-600 dark:text-green-400 shrink-0" />,
   },
   error: {
-    container: "bg-red-50 border-red-200 text-red-800",
-    icon: <AlertCircle size={18} className="text-red-600 shrink-0" />,
+    container: "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-700 text-red-800 dark:text-red-300",
+    icon: <AlertCircle size={18} className="text-red-600 dark:text-red-400 shrink-0" />,
   },
   info: {
-    container: "bg-blue-50 border-blue-200 text-blue-800",
-    icon: <Info size={18} className="text-blue-600 shrink-0" />,
+    container: "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-800 dark:text-blue-300",
+    icon: <Info size={18} className="text-blue-600 dark:text-blue-400 shrink-0" />,
   },
 };
 

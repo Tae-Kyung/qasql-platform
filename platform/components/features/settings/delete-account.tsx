@@ -5,14 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
+import { useLanguage } from "@/lib/i18n/context";
 
 export function DeleteAccount() {
+  const { t } = useLanguage();
   const toast = useToast();
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
+  const confirmWord = t.settings.dangerZoneConfirmWord;
+
   async function handleDelete() {
-    if (confirmText !== "DELETE") return;
+    if (confirmText !== confirmWord) return;
     setDeleting(true);
     try {
       const res = await fetch("/api/auth/delete-account", {
@@ -20,12 +24,12 @@ export function DeleteAccount() {
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        throw new Error(json.message ?? "계정 삭제 실패");
+        throw new Error(json.message ?? t.settings.accountDeleteFailed);
       }
-      toast.success("계정이 삭제되었습니다.");
+      toast.success(t.settings.accountDeleted);
       window.location.href = "/";
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "계정 삭제에 실패했습니다.");
+      toast.error(err instanceof Error ? err.message : t.settings.accountDeleteFailed);
     } finally {
       setDeleting(false);
     }
@@ -33,26 +37,29 @@ export function DeleteAccount() {
 
   return (
     <Card>
-      <div className="rounded-lg border border-red-200 bg-red-50 p-6">
-        <h3 className="font-semibold text-red-800 mb-2">계정 삭제 (위험 구역)</h3>
-        <p className="text-sm text-red-700 mb-4">
-          계정을 삭제하면 모든 데이터가 영구적으로 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
-          확인하려면 <strong>DELETE</strong>를 입력하세요.
+      <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-6">
+        <h3 className="font-semibold text-red-800 dark:text-red-400 mb-2">
+          {t.settings.dangerZoneTitle}
+        </h3>
+        <p className="text-sm text-red-700 dark:text-red-400 mb-4">
+          {t.settings.dangerZoneDescription}{" "}
+          <strong>{confirmWord}</strong>
+          {t.settings.dangerZoneDescriptionSuffix}
         </p>
 
         <div className="space-y-3 max-w-xs">
           <Input
-            placeholder="DELETE"
+            placeholder={confirmWord}
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
           />
           <Button
             variant="destructive"
-            disabled={confirmText !== "DELETE"}
+            disabled={confirmText !== confirmWord}
             loading={deleting}
             onClick={handleDelete}
           >
-            계정 영구 삭제
+            {t.settings.deleteAccount}
           </Button>
         </div>
       </div>
