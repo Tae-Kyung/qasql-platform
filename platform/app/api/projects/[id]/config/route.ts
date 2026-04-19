@@ -12,7 +12,7 @@ const configSchema = z.object({
   db: dbConfigSchema.optional(),
   llm: llmConfigSchema.optional(),
   readable_names: z.record(z.string(), z.record(z.string(), z.string())).optional(),
-  options: z.record(z.unknown()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
 });
 
 async function getOwnedProject(projectId: string, userId: string) {
