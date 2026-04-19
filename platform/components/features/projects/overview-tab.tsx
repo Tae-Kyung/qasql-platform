@@ -8,15 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useToast } from "@/components/ui/toast";
+import { useLanguage } from "@/lib/i18n/context";
 import { Project, ProjectConfig, ProjectStatus, SchemaStatus } from "@/types";
 import { format } from "date-fns";
 
-const schema = z.object({
-  name: z.string().min(1, "이름을 입력하세요").max(100, "100자 이하여야 합니다"),
-  description: z.string().max(500, "500자 이하여야 합니다").optional(),
-});
-
-type FormValues = z.infer<typeof schema>;
+type FormValues = { name: string; description?: string };
 
 interface OverviewTabProps {
   project: Project;
@@ -32,9 +28,16 @@ interface CheckItem {
 
 export function OverviewTab({ project, config, onStatusChange }: OverviewTabProps) {
   const toast = useToast();
+  const { t } = useLanguage();
+  const ov = t.projectDetail.overview;
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
   const [currentStatus, setCurrentStatus] = useState<ProjectStatus>(project.status);
+
+  const schema = z.object({
+    name: z.string().min(1, ov.nameError).max(100, ov.nameLengthError),
+    description: z.string().max(500, ov.descriptionLengthError).optional(),
+  });
 
   const {
     register,
@@ -49,21 +52,9 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
   });
 
   const checks: CheckItem[] = [
-    {
-      label: "DB 연결 설정",
-      done: !!config?.db_type,
-      hint: "DB 설정 탭에서 DB 타입과 접속 정보를 저장하세요",
-    },
-    {
-      label: "LLM 설정",
-      done: !!config?.llm_provider,
-      hint: "LLM 설정 탭에서 프로바이더와 API Key를 저장하세요",
-    },
-    {
-      label: "스키마 분석 완료",
-      done: (config?.schema_status as SchemaStatus) === "done",
-      hint: "스키마 탭에서 스키마 분석을 실행하세요",
-    },
+    { label: ov.dbConfig, done: !!config?.db_type, hint: ov.dbConfigHint },
+    { label: ov.llmConfig, done: !!config?.llm_provider, hint: ov.llmConfigHint },
+    { label: ov.schemaAnalysis, done: (config?.schema_status as SchemaStatus) === "done", hint: ov.schemaAnalysisHint },
   ];
   const allDone = checks.every((c) => c.done);
   const canActivate = allDone && currentStatus !== "active";
@@ -76,10 +67,10 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values),
       });
-      if (!res.ok) throw new Error("저장 실패");
-      toast.success("저장되었습니다.");
+      if (!res.ok) throw new Error();
+      toast.success(ov.saveSuccess);
     } catch {
-      toast.error("저장에 실패했습니다.");
+      toast.error(ov.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -93,12 +84,12 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "active" }),
       });
-      if (!res.ok) throw new Error("활성화 실패");
+      if (!res.ok) throw new Error();
       setCurrentStatus("active");
       onStatusChange?.("active");
-      toast.success("프로젝트가 활성화되었습니다!");
+      toast.success(ov.activateSuccess);
     } catch {
-      toast.error("활성화에 실패했습니다.");
+      toast.error(ov.activateFailed);
     } finally {
       setActivating(false);
     }
@@ -109,18 +100,18 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
       {/* 상태 & 날짜 */}
       <div className="flex items-center gap-4">
         <div>
-          <p className="text-sm text-gray-500 dark:text-slate-400">상태</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">{ov.status}</p>
           <StatusBadge status={currentStatus} />
         </div>
         <div>
-          <p className="text-sm text-gray-500 dark:text-slate-400">생성일</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">{ov.createdAt}</p>
           <p className="text-sm text-gray-700 dark:text-slate-300">{format(new Date(project.created_at), "yyyy-MM-dd HH:mm")}</p>
         </div>
       </div>
 
       {/* 설정 완료 체크리스트 */}
       <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-4 space-y-3">
-        <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">설정 진행 상황</p>
+        <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">{ov.setupProgress}</p>
         <div className="space-y-2">
           {checks.map((item) => (
             <div key={item.label} className="flex items-start gap-3">
@@ -146,20 +137,15 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
           {currentStatus === "active" ? (
             <div className="flex items-center gap-2 text-sm text-green-600">
               <span className="font-semibold">✓</span>
-              <span>프로젝트가 활성화되어 있습니다. Playground에서 테스트해보세요!</span>
+              <span>{ov.projectActive}</span>
             </div>
           ) : (
             <div className="flex items-center justify-between">
               <p className="text-xs text-gray-500 dark:text-slate-400">
-                {allDone ? "모든 설정이 완료되었습니다." : `${checks.filter(c => !c.done).length}개 항목 미완료`}
+                {allDone ? ov.allDone : `${checks.filter(c => !c.done).length}${ov.itemsIncomplete}`}
               </p>
-              <Button
-                onClick={handleActivate}
-                loading={activating}
-                disabled={!canActivate}
-                size="sm"
-              >
-                프로젝트 활성화
+              <Button onClick={handleActivate} loading={activating} disabled={!canActivate} size="sm">
+                {ov.activateProject}
               </Button>
             </div>
           )}
@@ -169,13 +155,13 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
       {/* 이름/설명 편집 폼 */}
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 max-w-md">
         <Input
-          label="프로젝트 이름"
+          label={ov.projectName}
           error={errors.name?.message}
           {...register("name")}
         />
 
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-gray-700 dark:text-slate-300">설명</label>
+          <label className="text-sm font-medium text-gray-700 dark:text-slate-300">{ov.description}</label>
           <textarea
             rows={4}
             className="w-full rounded-md border border-gray-300 dark:border-slate-600 px-3 py-2 text-sm text-gray-900 dark:text-slate-100 bg-white dark:bg-slate-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none placeholder:text-gray-400 dark:placeholder:text-slate-500"
@@ -187,7 +173,7 @@ export function OverviewTab({ project, config, onStatusChange }: OverviewTabProp
         </div>
 
         <Button type="submit" loading={saving}>
-          저장
+          {ov.save}
         </Button>
       </form>
     </div>

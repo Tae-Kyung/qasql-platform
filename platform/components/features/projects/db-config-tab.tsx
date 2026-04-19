@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { useLanguage } from "@/lib/i18n/context";
 import { DbType, ProjectConfig } from "@/types";
 
 const DB_TYPE_OPTIONS = [
@@ -21,6 +22,8 @@ interface DbConfigTabProps {
 
 export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
   const toast = useToast();
+  const { t } = useLanguage();
+  const db = t.projectDetail.dbConfig;
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -66,10 +69,10 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ db: dbBody }),
       });
-      if (!res.ok) throw new Error("저장 실패");
-      toast.success("DB 설정이 저장되었습니다.");
+      if (!res.ok) throw new Error();
+      toast.success(db.saveSuccess);
     } catch {
-      toast.error("DB 설정 저장에 실패했습니다.");
+      toast.error(db.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -78,7 +81,6 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
   async function handleTestDb() {
     setTesting(true);
     try {
-      // 먼저 현재 폼 값을 저장
       let dbBody: Record<string, unknown> = { db_type: dbType };
       if (dbType === "supabase") {
         dbBody = { ...dbBody, supabase_url: supabaseUrl };
@@ -104,23 +106,22 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
       });
       if (!saveRes.ok) {
         const saveJson = await saveRes.json().catch(() => ({}));
-        toast.error(saveJson.message ?? "설정 저장 실패 — 입력 값을 확인하세요");
+        toast.error(saveJson.message ?? db.savingFailed);
         return;
       }
 
-      // 저장 후 테스트
-      const res = await fetch(`/api/projects/${projectId}/test-db`, {
-        method: "POST",
-      });
+      const res = await fetch(`/api/projects/${projectId}/test-db`, { method: "POST" });
       const json = await res.json();
       if (res.ok) {
         const count = json.data?.table_count;
-        toast.success(count != null ? `연결 성공! (테이블 ${count}개)` : "DB 연결 성공!");
+        toast.success(count != null
+          ? db.testSuccess.replace("{count}", String(count))
+          : db.testSuccessNoCount);
       } else {
-        toast.error(json.message ?? "DB 연결 실패");
+        toast.error(json.message ?? db.testFailed);
       }
     } catch {
-      toast.error("DB 연결 테스트에 실패했습니다.");
+      toast.error(db.testError);
     } finally {
       setTesting(false);
     }
@@ -129,7 +130,7 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
   return (
     <div className="space-y-6 max-w-md">
       <Select
-        label="DB 타입"
+        label={db.dbType}
         options={DB_TYPE_OPTIONS}
         value={dbType}
         onChange={(e) => setDbType(e.target.value as DbType)}
@@ -137,7 +138,7 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
 
       {dbType === "sqlite" && (
         <Input
-          label="파일 경로"
+          label={db.filePath}
           placeholder="/path/to/database.db"
           value={filePath}
           onChange={(e) => setFilePath(e.target.value)}
@@ -155,34 +156,29 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
           <Input
             label="Service Role Key"
             type="password"
-            placeholder={hasSavedSupabaseKey ? "저장됨 (변경하려면 새로 입력)" : "service_role key 입력"}
+            placeholder={hasSavedSupabaseKey ? db.savedCredential : db.serviceRolePlaceholder}
             value={supabaseKey}
             onChange={(e) => setSupabaseKey(e.target.value)}
           />
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700 dark:text-slate-300">
-              PostgreSQL Connection String <span className="text-gray-400 dark:text-slate-500 font-normal">(선택 — SQL 직접 실행 시 필요)</span>
+              {db.pgConnectionString} <span className="text-gray-400 dark:text-slate-500 font-normal">{db.pgConnectionStringOptional}</span>
             </label>
             <input
               type="password"
-              placeholder={hasSavedPgUri ? "저장됨 (변경하려면 새로 입력)" : "postgresql://postgres:password@host:5432/postgres"}
+              placeholder={hasSavedPgUri ? db.savedCredential : "postgresql://postgres:password@host:5432/postgres"}
               value={pgUri}
               onChange={(e) => setPgUri(e.target.value)}
               className="w-full rounded-md border border-gray-300 dark:border-slate-600 px-3 py-2 text-sm text-gray-900 dark:text-slate-100 bg-white dark:bg-slate-700 outline-none transition-colors placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p className="text-xs text-gray-400 dark:text-slate-500">Supabase 대시보드 → Connect → Connection string (URI) 에서 복사</p>
+            <p className="text-xs text-gray-400 dark:text-slate-500">{db.pgConnectionStringHint}</p>
           </div>
         </>
       )}
 
       {(dbType === "postgresql" || dbType === "mysql") && (
         <>
-          <Input
-            label="Host"
-            placeholder="localhost"
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-          />
+          <Input label="Host" placeholder="localhost" value={host} onChange={(e) => setHost(e.target.value)} />
           <Input
             label="Port"
             type="number"
@@ -190,22 +186,12 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
             value={port}
             onChange={(e) => setPort(e.target.value)}
           />
+          <Input label={db.dbName} placeholder="mydb" value={dbName} onChange={(e) => setDbName(e.target.value)} />
+          <Input label={db.user} placeholder="postgres" value={dbUser} onChange={(e) => setDbUser(e.target.value)} />
           <Input
-            label="DB 이름"
-            placeholder="mydb"
-            value={dbName}
-            onChange={(e) => setDbName(e.target.value)}
-          />
-          <Input
-            label="사용자"
-            placeholder="postgres"
-            value={dbUser}
-            onChange={(e) => setDbUser(e.target.value)}
-          />
-          <Input
-            label="비밀번호"
+            label={db.password}
             type="password"
-            placeholder={hasSavedPassword ? "저장됨 (변경하려면 새로 입력)" : "비밀번호 입력"}
+            placeholder={hasSavedPassword ? db.savedCredential : db.passwordPlaceholder}
             value={dbPassword}
             onChange={(e) => setDbPassword(e.target.value)}
           />
@@ -213,12 +199,8 @@ export function DbConfigTab({ projectId, config }: DbConfigTabProps) {
       )}
 
       <div className="flex gap-3">
-        <Button onClick={handleSave} loading={saving}>
-          저장
-        </Button>
-        <Button variant="outline" onClick={handleTestDb} loading={testing}>
-          연결 테스트
-        </Button>
+        <Button onClick={handleSave} loading={saving}>{db.save}</Button>
+        <Button variant="outline" onClick={handleTestDb} loading={testing}>{db.testConnection}</Button>
       </div>
     </div>
   );

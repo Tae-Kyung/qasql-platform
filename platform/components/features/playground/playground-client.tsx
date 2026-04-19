@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { useLanguage } from "@/lib/i18n/context";
 
 interface PlaygroundResult {
   rows: Record<string, unknown>[];
@@ -19,6 +20,8 @@ interface PlaygroundClientProps {
 }
 
 export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType }: PlaygroundClientProps) {
+  const { t } = useLanguage();
+  const pg = t.projectDetail.playground;
   const isSchemaReady = schemaStatus === "done";
   const isSupabase = dbType === "supabase";
   const [question, setQuestion] = useState("");
@@ -54,7 +57,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
       const data = await res.json();
 
       if (!data.success) {
-        setError(data.message ?? data.error ?? "SQL 생성에 실패했습니다");
+        setError(data.message ?? data.error ?? pg.generateFailed);
         return;
       }
 
@@ -64,7 +67,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
       setConfidence((data.confidence as number | undefined) ?? null);
       setReasoning((data.reasoning as string | undefined) ?? null);
     } catch {
-      setError("네트워크 오류가 발생했습니다");
+      setError(pg.networkError);
     } finally {
       setIsGenerating(false);
     }
@@ -87,7 +90,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
       const data = await res.json();
 
       if (!data.success) {
-        setError(data.message ?? data.error ?? "SQL 실행에 실패했습니다");
+        setError(data.message ?? data.error ?? pg.executeFailed);
         return;
       }
 
@@ -97,7 +100,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
         row_count: (data.row_count as number | undefined) ?? 0,
       });
     } catch {
-      setError("네트워크 오류가 발생했습니다");
+      setError(pg.networkError);
     } finally {
       setIsExecuting(false);
     }
@@ -113,76 +116,70 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
     <div className="max-w-5xl mx-auto space-y-6">
       {/* 헤더 */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Playground</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">{projectName} — 자연어로 데이터를 조회해보세요</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">{pg.title}</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">{projectName}{pg.subtitle}</p>
       </div>
 
       {/* 스키마 미완료 경고 */}
       {!isSchemaReady && (
         <div className="rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
-          <p className="text-sm text-amber-700 dark:text-amber-300 font-medium">스키마 분석이 필요합니다</p>
-          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">스키마 탭에서 분석을 먼저 완료해야 정확한 SQL을 생성할 수 있습니다.</p>
+          <p className="text-sm text-amber-700 dark:text-amber-300 font-medium">{pg.schemaWarningTitle}</p>
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{pg.schemaWarningBody}</p>
         </div>
       )}
 
       {/* Supabase SQL 실행 안내 */}
       {isSupabase && (
         <div className="rounded-lg border border-blue-100 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
-          <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">Supabase — SQL 복사 후 실행</p>
-          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">생성된 SQL을 복사하여 Supabase 대시보드의 <strong>SQL Editor</strong>에서 실행하세요.</p>
+          <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">{pg.supabaseInfoTitle}</p>
+          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+            {pg.supabaseInfoBody} <strong>SQL Editor</strong>{pg.supabaseInfoBodySuffix}
+          </p>
         </div>
       )}
 
       {/* 입력 영역 */}
-      <Card title="질문 입력">
+      <Card title={pg.questionCard}>
         <div className="space-y-4">
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">자연어 질문</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">{pg.questionLabel}</label>
             <textarea
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="예: 지난 달 가장 많이 구매한 상품 10개를 알려줘"
+              placeholder={pg.questionPlaceholder}
               rows={3}
               className="w-full rounded-md border border-gray-300 dark:border-slate-600 px-3 py-2 text-sm text-gray-900 dark:text-slate-100 bg-white dark:bg-slate-700 outline-none transition-colors placeholder:text-gray-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
             />
           </div>
 
           <Input
-            label="힌트 (선택)"
+            label={pg.hintLabel}
             value={hint}
             onChange={(e) => setHint(e.target.value)}
-            placeholder="특정 테이블이나 조건 힌트 입력"
+            placeholder={pg.hintPlaceholder}
           />
 
           <div className="flex justify-end">
-            <Button
-              onClick={handleGenerateSql}
-              loading={isGenerating}
-              disabled={!question.trim() || isGenerating}
-            >
-              SQL 생성
+            <Button onClick={handleGenerateSql} loading={isGenerating} disabled={!question.trim() || isGenerating}>
+              {pg.generateSql}
             </Button>
           </div>
         </div>
       </Card>
 
-      {/* 결과 영역 — SQL이 생성된 후 표시 */}
+      {/* 생성된 SQL */}
       {generatedSql !== null && (
-        <Card title="생성된 SQL">
+        <Card title={pg.generatedSqlCard}>
           <div className="space-y-4">
-            {/* 신뢰도 */}
             {confidence !== null && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500 dark:text-slate-400">신뢰도:</span>
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-semibold ${getConfidenceColor(confidence)}`}
-                >
+                <span className="text-sm text-gray-500 dark:text-slate-400">{pg.confidenceLabel}</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-semibold ${getConfidenceColor(confidence)}`}>
                   {Math.round(confidence * 100)}%
                 </span>
               </div>
             )}
 
-            {/* Reasoning */}
             {reasoning && (
               <div className="rounded-md border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-700/50">
                 <button
@@ -190,7 +187,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
                   onClick={() => setReasoningExpanded((prev) => !prev)}
                   className="flex items-center justify-between w-full px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors rounded-md"
                 >
-                  <span>추론 과정</span>
+                  <span>{pg.reasoningTitle}</span>
                   <span className="text-gray-400 dark:text-slate-500">{reasoningExpanded ? "▲" : "▼"}</span>
                 </button>
                 {reasoningExpanded && (
@@ -201,16 +198,15 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
               </div>
             )}
 
-            {/* SQL 편집 영역 */}
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-700 dark:text-slate-300">SQL (편집 가능)</label>
+                <label className="text-sm font-medium text-gray-700 dark:text-slate-300">{pg.sqlLabel}</label>
                 <button
                   type="button"
                   onClick={() => { navigator.clipboard.writeText(editedSql); }}
                   className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 px-2 py-1 rounded border border-blue-200 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                 >
-                  복사
+                  {pg.copy}
                 </button>
               </div>
               <textarea
@@ -222,13 +218,8 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
             </div>
 
             <div className="flex justify-end">
-              <Button
-                onClick={handleExecuteSql}
-                loading={isExecuting}
-                disabled={!editedSql.trim() || isExecuting}
-                variant="outline"
-              >
-                SQL 실행
+              <Button onClick={handleExecuteSql} loading={isExecuting} disabled={!editedSql.trim() || isExecuting} variant="outline">
+                {pg.executeSql}
               </Button>
             </div>
           </div>
@@ -244,19 +235,16 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
 
       {/* 결과 테이블 */}
       {result && (
-        <Card title={`실행 결과 (${result.row_count}행)`}>
+        <Card title={`${pg.resultCard} (${result.row_count})`}>
           {result.columns.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-slate-400">반환된 데이터가 없습니다</p>
+            <p className="text-sm text-gray-500 dark:text-slate-400">{pg.noData}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-slate-700 text-sm">
                 <thead className="bg-gray-50 dark:bg-slate-700/50">
                   <tr>
                     {result.columns.map((col) => (
-                      <th
-                        key={col}
-                        className="px-4 py-2 text-left font-medium text-gray-700 dark:text-slate-300 whitespace-nowrap"
-                      >
+                      <th key={col} className="px-4 py-2 text-left font-medium text-gray-700 dark:text-slate-300 whitespace-nowrap">
                         {col}
                       </th>
                     ))}
@@ -266,10 +254,7 @@ export function PlaygroundClient({ projectId, projectName, schemaStatus, dbType 
                   {result.rows.map((row, rowIdx) => (
                     <tr key={rowIdx} className="hover:bg-gray-50 dark:hover:bg-slate-700/30">
                       {result.columns.map((col) => (
-                        <td
-                          key={col}
-                          className="px-4 py-2 text-gray-700 dark:text-slate-300 whitespace-nowrap max-w-xs truncate"
-                        >
+                        <td key={col} className="px-4 py-2 text-gray-700 dark:text-slate-300 whitespace-nowrap max-w-xs truncate">
                           {row[col] === null || row[col] === undefined
                             ? <span className="text-gray-400 dark:text-slate-500 italic">null</span>
                             : String(row[col])}
