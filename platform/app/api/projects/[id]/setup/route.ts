@@ -71,18 +71,23 @@ export const POST = withAuth(async (_req, ctx, user: User) => {
 
   // Supabase 타입은 OpenAPI 스펙으로 직접 처리 (Python 엔진 불필요)
   if (config.db_type === "supabase") {
-    // 비동기로 처리 (응답 먼저 반환)
-    runSupabaseSetup(id, config.supabase_url, config.supabase_key_enc, supabase).catch(() => {
-      supabase
+    try {
+      await runSupabaseSetup(id, config.supabase_url, config.supabase_key_enc, supabase);
+      return NextResponse.json({
+        success: true,
+        data: { schema_status: "done", message: "스키마 초기화가 완료되었습니다" },
+      });
+    } catch (err) {
+      await supabase
         .from("qasql_project_configs")
         .update({ schema_status: "error" })
         .eq("project_id", id);
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: { schema_status: "running", message: "스키마 초기화가 시작되었습니다" },
-    });
+      const msg = err instanceof Error ? err.message : "스키마 초기화 실패";
+      return NextResponse.json(
+        { success: false, error: "SETUP_FAILED", message: msg },
+        { status: 500 }
+      );
+    }
   }
 
   // PostgreSQL/MySQL/SQLite: Python 엔진으로 위임
