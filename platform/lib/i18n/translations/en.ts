@@ -118,6 +118,18 @@ export const en = {
     unknownError: "An unknown error occurred.",
   },
 
+  projectDetail: {
+    tabs: {
+      overview: "Overview",
+      db: "DB Config",
+      llm: "LLM Config",
+      schema: "Schema",
+      playground: "Playground",
+      apikeys: "API Keys",
+      danger: "Danger Zone",
+    },
+  },
+
   settings: {
     title: "Account Settings",
     accountInfo: "Account Information",

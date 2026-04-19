@@ -120,6 +120,18 @@ export const ko: Translations = {
     unknownError: "알 수 없는 오류가 발생했습니다.",
   },
 
+  projectDetail: {
+    tabs: {
+      overview: "개요",
+      db: "DB 설정",
+      llm: "LLM 설정",
+      schema: "스키마",
+      playground: "Playground",
+      apikeys: "API Key",
+      danger: "위험 구역",
+    },
+  },
+
   settings: {
     title: "계정 설정",
     accountInfo: "계정 정보",
