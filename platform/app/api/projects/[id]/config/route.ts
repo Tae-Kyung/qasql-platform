@@ -11,7 +11,7 @@ import { z } from "zod";
 const configSchema = z.object({
   db: dbConfigSchema.optional(),
   llm: llmConfigSchema.optional(),
-  readable_names: z.record(z.record(z.string())).optional(),
+  readable_names: z.record(z.string(), z.record(z.string(), z.string())).optional(),
   options: z.record(z.unknown()).optional(),
 });
 
